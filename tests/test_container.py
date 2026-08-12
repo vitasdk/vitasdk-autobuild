@@ -32,12 +32,22 @@ class TestAgainstRealPacman(unittest.TestCase):
         self.assertIsInstance(build.installed_dependencies(SDK), list)
 
     def test_querying_does_not_use_transaction_options(self):
-        # pacman answers 'invalid option --noscriptlet' to a query. When that
-        # error was swallowed, the prefix was never reset and one build kept
-        # polluting the next.
+        # pacman answers 'invalid option' to a query carrying a transaction
+        # option. When that error was swallowed, the prefix was never reset
+        # and one build kept polluting the next.
         result = build.pacman(SDK, "--query", "--deps", "--quiet", check=False)
         self.assertNotIn("invalid option", (result.stderr or "").lower())
-        self.assertEqual(result.returncode, 0, result.stderr)
+
+        # An exit code of 1 with no output at all is not an error: it is what
+        # pacman says when the local database holds no packages, which is the
+        # state of an SDK installed from a tarball. vita-makepkg had to learn
+        # the same distinction in run_pacman.
+        if result.returncode != 0:
+            self.assertEqual((result.stdout, result.stderr), ("", ""),
+                             "a failing query must be the empty database case")
+
+    def test_the_installed_list_is_readable_either_way(self):
+        self.assertIsInstance(build.installed_dependencies(SDK), list)
 
     def test_resetting_the_prefix_twice_is_harmless(self):
         build.reset_dependencies(SDK)
