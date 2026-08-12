@@ -32,8 +32,32 @@ jobs:
       contents: read
       packages: write
 
-  supervise:
+  # The worker path only breaks against a real SDK: pacman rejecting an option,
+  # a directory owned by the wrong user, makepkg refusing to run as root. This
+  # exercises it in the image the workers will use, before six of them are sent
+  # off to fail the same way at once.
+  smoke:
     needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/${{ github.repository }}/build:${{ needs.image.outputs.tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0:0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Exercise the worker path against the real SDK
+        run: python3 -m unittest tests.test_container -v
+
+  supervise:
+    needs: [image, smoke]
     runs-on: ubuntu-24.04
     # Long enough to follow a full rebuild of the catalogue.
     timeout-minutes: 1440
