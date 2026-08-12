@@ -360,6 +360,23 @@ def download_asset_text(asset: Asset) -> str:
     return body.decode("utf-8", "replace")
 
 
+def dispatch_repository(repo: str, event_type: str, token: str,
+                        payload: dict[str, Any] | None = None) -> None:
+    """Sends a repository_dispatch to another repository, with its own token.
+
+    A job's GITHUB_TOKEN is confined to the repository it runs in, so telling
+    another one that something happened needs a credential of its own.
+    """
+
+    body: dict[str, Any] = {"event_type": event_type}
+    if payload:
+        body["client_payload"] = payload
+    _request("POST", f"{API_ROOT}/repos/{repo}/dispatches",
+             data=json.dumps(body).encode(),
+             headers={"Content-Type": "application/json",
+                      "Authorization": f"Bearer {token}"})
+
+
 def dispatch_workflow(repo: str, workflow: str, ref: str, inputs: dict[str, str]) -> None:
     get_token(write=True)
     api("POST", f"/repos/{repo}/actions/workflows/{workflow}/dispatches",

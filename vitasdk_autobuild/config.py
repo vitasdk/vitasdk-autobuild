@@ -98,6 +98,13 @@ STATUS_RELEASE = "status"
 # staging area that is already correct.
 LEGACY_CORE_MARKER = "core-snapshot.txt"
 
+# The catalogue, told to refresh as soon as a new status file is published.
+# It also polls on its own schedule, so this only decides whether the site is
+# a minute behind or half an hour. Needs a token with write access to that
+# repository, since a job's own token cannot dispatch into another one.
+WEBSITE_REPO = "vitasdk/vitasdk-web"
+WEBSITE_EVENT = "status_updated"
+
 # Prefix of the immutable snapshot releases cut from the staging area.
 SNAPSHOT_PREFIX = "packages-snapshot-"
 

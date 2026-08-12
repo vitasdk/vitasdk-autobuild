@@ -90,6 +90,29 @@ def update_status(snapshot: state.Snapshot) -> None:
         downloads={a.filename: a.downloads for a in snapshot.staging_assets})
     content = json.dumps(status, indent=2).encode() + b"\n"
     gh.upload_asset(state.status_release(), "status.json", content=content, replace=True)
+    notify_website()
+
+
+def notify_website() -> None:
+    """Tells the catalogue a new status file is up.
+
+    Optional by design: without a token the site still refreshes on its own
+    schedule, so a missing secret makes the site slower, never wrong.
+    """
+
+    if not config.WEBSITE_REPO:
+        return
+    token = os.environ.get("WEBSITE_TOKEN", "")
+    if not token:
+        print("::notice::No WEBSITE_TOKEN set: the catalogue will pick this up "
+              "on its own schedule instead", flush=True)
+        return
+    try:
+        gh.dispatch_repository(config.WEBSITE_REPO, config.WEBSITE_EVENT, token)
+        print(f"Asked {config.WEBSITE_REPO} to refresh", flush=True)
+    except gh.GitHubError as e:
+        # Never fail a build over the website being slow to update.
+        print(f"::warning::could not notify {config.WEBSITE_REPO}: {e}", flush=True)
 
 
 def cmd_update_status(args: Any) -> None:

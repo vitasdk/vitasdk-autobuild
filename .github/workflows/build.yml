@@ -74,6 +74,7 @@ jobs:
       - name: Plan, dispatch and follow the build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
         shell: bash
         run: |
@@ -87,10 +88,12 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
         run: python3 -m vitasdk_autobuild clean-assets
 
       - name: Refresh the staging repository index
         if: ${{ !inputs.dry_run }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
         run: python3 -m vitasdk_autobuild snapshot --staging

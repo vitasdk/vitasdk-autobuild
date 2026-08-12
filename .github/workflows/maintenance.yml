@@ -45,6 +45,7 @@ jobs:
       - name: ${{ inputs.action }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
           ACTION: ${{ inputs.action }}
           PATTERN: ${{ inputs.pattern }}
           DRY_RUN: ${{ inputs.dry_run }}

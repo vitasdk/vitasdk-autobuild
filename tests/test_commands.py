@@ -300,6 +300,38 @@ class TestRepositoryGeneration(unittest.TestCase):
         arguments = run.call_args[0][0]
         self.assertIn("REPOSITORY_NAME=vita", arguments)
 
+class TestWebsiteNotification(unittest.TestCase):
+    """Telling the catalogue is an optimisation, never a requirement."""
+
+    def test_without_a_token_nothing_is_sent(self):
+        import os
+        from unittest import mock
+        environ = {k: v for k, v in os.environ.items() if k != "WEBSITE_TOKEN"}
+        with mock.patch.dict(os.environ, environ, clear=True):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.notify_website()
+        dispatch.assert_not_called()
+
+    def test_with_a_token_the_catalogue_is_told(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"WEBSITE_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.notify_website()
+        repo, event, token = dispatch.call_args[0]
+        self.assertEqual(repo, config.WEBSITE_REPO)
+        self.assertEqual(event, config.WEBSITE_EVENT)
+        self.assertEqual(token, "secret")
+
+    def test_a_failure_to_notify_does_not_fail_the_build(self):
+        import os
+        from unittest import mock
+        from vitasdk_autobuild import gh
+        with mock.patch.dict(os.environ, {"WEBSITE_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository",
+                                   side_effect=gh.GitHubError(404, "Not Found")):
+                commands.notify_website()  # must not raise
+
 
 if __name__ == "__main__":
     unittest.main()
