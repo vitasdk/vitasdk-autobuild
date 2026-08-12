@@ -1,0 +1,100 @@
+name: core-update
+
+# Build the catalogue against a newly published core.
+#
+# This applies the change rather than proposing it, which is right as long as
+# a core is only published when something in it actually changed. If cores
+# ever go back to being produced on a timer regardless of changes, this turns
+# into a nightly rebuild of the whole catalogue and the decision has to move
+# somewhere else: either back to a pull request, or to autobuilds deciding
+# which publications are worth announcing.
+#
+# Nothing is lost if it fires wrongly: published snapshots are immutable, so
+# only the staging area and some build time are spent.
+
+on:
+  repository_dispatch:
+    types: [core_published]
+  workflow_dispatch:
+    inputs:
+      core:
+        description: Core snapshot tag to build against
+        required: true
+        type: string
+      world:
+        description: Which world, by architecture (empty means the first one)
+        type: string
+        default: ''
+      dry_run:
+        description: Write the change and stop, without pushing or rebuilding
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: core-update
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Point the world at the new core
+        id: bump
+        env:
+          CORE: ${{ inputs.core || github.event.client_payload.core_snapshot }}
+          WORLD: ${{ inputs.world || github.event.client_payload.world }}
+        shell: bash
+        run: |
+          if [[ -z $CORE ]]; then
+            echo '::error::no core snapshot given'
+            exit 1
+          fi
+          arguments=(bump-core --core "$CORE")
+          if [[ -n $WORLD ]]; then
+            arguments+=(--world "$WORLD")
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"
+          if git diff --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::already building against $CORE, nothing to do"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+            echo "core=$CORE" >> "$GITHUB_OUTPUT"
+            git --no-pager diff
+          fi
+
+      - name: Record it
+        if: steps.bump.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CORE: ${{ steps.bump.outputs.core }}
+        shell: bash
+        run: |
+          git config user.name 'vitasdk-autobuild'
+          git config user.email 'vitasdk-autobuild@users.noreply.github.com'
+          git commit --all --message "Build against ${CORE}" \
+            --message "The staged packages of that world are dropped and rebuilt against the new core, which is what keeps a published snapshot from ever mixing cores."
+          git push --quiet \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${GITHUB_REF_NAME}"
+          # The workers run the code from build-branch, so it has to carry the
+          # new pin before any of them start.
+          git push --quiet --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:build-branch"
+
+      - name: Rebuild the catalogue against it
+        if: steps.bump.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run build.yml --ref "${GITHUB_REF_NAME}"

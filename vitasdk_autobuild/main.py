@@ -73,6 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
                           help="recorded in provenance.json")
     snapshot.set_defaults(func=commands.cmd_snapshot)
 
+    bump = subparsers.add_parser(
+        "bump-core",
+        help="point a world at a newer core snapshot, for review")
+    bump.add_argument("--core", required=True, help="the core snapshot tag to pin")
+    bump.add_argument("--world", help="which world, by architecture")
+    bump.set_defaults(func=commands.cmd_bump_core)
+
     update = subparsers.add_parser(
         "update-recipes",
         help="pin recipes that follow a git branch to the commit served today")

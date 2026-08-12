@@ -251,6 +251,53 @@ class TestEvaluatedSources(unittest.TestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual(list(pairs.values())[0].fragment, "#commit=" + "b" * 40)
 
+CONFIG = '''WORLDS: list[World] = [
+    World(
+        arch="vita",
+        core="sdk-snapshot-20260812.565.1",
+        repository="vita",
+        triple="arm-vita-eabi",
+    ),
+    World(
+        arch="vita-musl",
+        core="musl-snapshot-1",
+        repository="vita-musl",
+    ),
+]
+'''
+
+
+class TestSetCore(unittest.TestCase):
+    """Repointing a world at a newer core, as a reviewable text change."""
+
+    def test_changes_only_the_named_world(self):
+        updated = recipes.set_core(CONFIG, "vita", "sdk-snapshot-20260901.9.1")
+        self.assertIn('core="sdk-snapshot-20260901.9.1"', updated)
+        self.assertIn('core="musl-snapshot-1"', updated)
+
+    def test_leaves_everything_else_alone(self):
+        updated = recipes.set_core(CONFIG, "vita", "new")
+        self.assertIn('triple="arm-vita-eabi"', updated)
+        self.assertEqual(updated.count("World("), 2)
+
+    def test_the_second_world_can_be_bumped_too(self):
+        updated = recipes.set_core(CONFIG, "vita-musl", "musl-snapshot-2")
+        self.assertIn('core="sdk-snapshot-20260812.565.1"', updated)
+        self.assertIn('core="musl-snapshot-2"', updated)
+
+    def test_an_unknown_world_is_an_error(self):
+        with self.assertRaises(ValueError):
+            recipes.set_core(CONFIG, "vita-llvm", "whatever")
+
+    def test_the_real_configuration_can_be_rewritten(self):
+        # The regex has to match the file as it is actually written, not a
+        # sample that happens to look like it.
+        import pathlib
+        from vitasdk_autobuild import config
+        text = pathlib.Path(config.__file__).read_text()
+        updated = recipes.set_core(text, config.default_world().arch, "sdk-snapshot-test")
+        self.assertIn('core="sdk-snapshot-test"', updated)
+
 
 if __name__ == "__main__":
     unittest.main()

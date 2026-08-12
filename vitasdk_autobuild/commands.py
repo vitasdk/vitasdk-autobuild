@@ -363,6 +363,49 @@ def cmd_clear_failed(args: Any) -> None:
             gh.delete_asset(failed.repo, asset)
 
 
+# ---------------------------------------------------------------- core pin
+
+def cmd_bump_core(args: Any) -> None:
+    """Points a world at a newer core, for a human to review and merge.
+
+    A new core is published every night. Taking it means rebuilding that
+    world's entire catalogue, so this writes the change and stops: what
+    decides when that happens is a merge, not a notification.
+    """
+
+    world = config.world_by_arch(args.world) if args.world else config.default_world()
+    path = os.path.join(os.path.dirname(os.path.abspath(config.__file__)), "config.py")
+    with open(path, encoding="utf-8") as handle:
+        original = handle.read()
+
+    if world.core == args.core:
+        notice(f"{world.arch} is already pinned to {args.core}")
+        return
+
+    try:
+        updated = recipes.set_core(original, world.arch, args.core)
+    except ValueError as e:
+        raise SystemExit(f"ERROR: {e}")
+
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(updated)
+
+    # Read it back the way every command will: a configuration that no longer
+    # imports would be found by the next run instead of by this one.
+    result = subprocess.run(
+        ["python3", "-c",
+         "from vitasdk_autobuild import config; "
+         f"print(config.world_by_arch({world.arch!r}).core)"],
+        capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(path)))
+    if result.returncode != 0 or result.stdout.strip() != args.core:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(original)
+        raise SystemExit(f"ERROR: the configuration did not take the new core: "
+                         f"{(result.stderr or result.stdout).strip()}")
+
+    notice(f"{world.arch}: {world.core} -> {args.core}")
+
+
 # ---------------------------------------------------------------- recipes
 
 def cmd_update_recipes(args: Any) -> None:

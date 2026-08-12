@@ -260,3 +260,30 @@ def recipe_cache_dir(root: str) -> str:
 
 def have_git() -> bool:
     return shutil.which("git") is not None
+
+
+CORE_LINE = re.compile(
+    r'(?P<head>World\(\s*\n\s*arch="(?P<arch>[^"]+)",\s*\n\s*core=")(?P<core>[^"]*)(?P<tail>")')
+
+
+def set_core(text: str, arch: str, core: str) -> str:
+    """Points one world at a different core snapshot.
+
+    The pin lives in configuration because changing it rebuilds that world's
+    whole catalogue. Rewriting it is therefore a commit someone reviews, not
+    something a notification does on its own.
+    """
+
+    found = False
+
+    def replace(match: "re.Match[str]") -> str:
+        nonlocal found
+        if match.group("arch") != arch:
+            return match.group(0)
+        found = True
+        return match.group("head") + core + match.group("tail")
+
+    updated = CORE_LINE.sub(replace, text)
+    if not found:
+        raise ValueError(f"no world with arch {arch!r} in the configuration")
+    return updated
