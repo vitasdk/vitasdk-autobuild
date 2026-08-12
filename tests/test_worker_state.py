@@ -145,6 +145,31 @@ class TestPacmanDiagnostics(unittest.TestCase):
                     result = build.pacman("/opt/vitasdk", "--query", check=False)
         self.assertEqual(result.returncode, 1)
 
+class TestTransactionOnlyOptions(unittest.TestCase):
+    """pacman rejects transaction options on a query.
+
+    vita-makepkg had this exact defect: --noscriptlet passed to every call made
+    .BUILDINFO generation abort. Here it made the query for installed packages
+    fail, so the prefix was never reset and one build kept polluting the next.
+    """
+
+    def arguments_for(self, *arguments):
+        import subprocess as sp
+        ok = sp.CompletedProcess([], 0, "", "")
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
+            with mock.patch("subprocess.run", return_value=ok) as run:
+                build.pacman("/opt/vitasdk", *arguments)
+        return run.call_args[0][0]
+
+    def test_a_query_carries_no_transaction_options(self):
+        self.assertNotIn("--noscriptlet", self.arguments_for("--query", "--deps", "--quiet"))
+
+    def test_an_install_does(self):
+        self.assertIn("--noscriptlet", self.arguments_for("--upgrade", "--asdeps", "x.pkg.tar.xz"))
+
+    def test_a_removal_does(self):
+        self.assertIn("--noscriptlet", self.arguments_for("--remove", "--nodeps", "zlib"))
+
 
 if __name__ == "__main__":
     unittest.main()

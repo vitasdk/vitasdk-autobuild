@@ -70,6 +70,12 @@ def expected_outputs(package: Package, produced: Iterable[str]) -> list[str]:
     return found
 
 
+# Options pacman only accepts on a transaction. Passing --noscriptlet to a
+# query makes it exit with "invalid option", which is the same defect
+# vita-makepkg already had to fix in run_pacman.
+TRANSACTIONS = ("--upgrade", "--remove", "--sync", "-U", "-R", "-S")
+
+
 def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
     """Runs the SDK's own pacman against the SDK prefix.
 
@@ -87,7 +93,8 @@ def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.Complete
         "--dbpath", os.path.join(sdk, "var", "lib", "pacman"),
         "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
         "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
-        "--noscriptlet", "--noconfirm", "--noprogressbar", *arguments,
+        *(["--noscriptlet"] if any(a in TRANSACTIONS for a in arguments) else []),
+        "--noconfirm", "--noprogressbar", *arguments,
     ], os.environ, ["PATH", "HOME", "VITASDK"])
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
