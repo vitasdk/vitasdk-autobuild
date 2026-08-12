@@ -131,12 +131,13 @@ def get_queue_with_status(full_details: bool = False,
                 if urls:
                     failed_urls[asset.filename] = urls
 
-    published_tag, repo_versions = repodb.get_published_versions()
+    published_tag, published = repodb.get_published_versions()
     for package in packages:
-        for name in package.binaries:
-            if name in repo_versions:
-                package.repo_version = repo_versions[name]
-                break
+        for arch, versions in published.items():
+            for name in package.binaries:
+                if name in versions:
+                    package.repo_versions[arch] = versions[name]
+                    break
 
     queue.apply_status(packages, done_names, failed_names, failed_urls)
     return Snapshot(

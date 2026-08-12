@@ -36,8 +36,13 @@ def parse_database(data: bytes) -> dict[str, str]:
     return versions
 
 
-def get_published_versions() -> tuple[str, dict[str, str]]:
-    """Versions in the newest published snapshot, and the tag it came from."""
+def get_published_versions() -> tuple[str, dict[str, dict[str, str]]]:
+    """Versions in the newest published snapshot, per world.
+
+    Each world publishes its own repository into the same release, so what is
+    already out there has to be read once per world: a package can be
+    published for one and never have existed for another.
+    """
 
     repo = gh.get_snapshot_repo()
     tags = gh.find_releases(repo, config.SNAPSHOT_PREFIX)
@@ -46,16 +51,20 @@ def get_published_versions() -> tuple[str, dict[str, str]]:
     tag = tags[0]
 
     release = gh.get_release(repo, tag, create=False)
-    database = f"{config.REPOSITORY_NAME}.db"
-    for asset in gh.get_assets(release):
-        if asset.filename != database:
+    assets = {asset.filename: asset for asset in gh.get_assets(release)}
+    published: dict[str, dict[str, str]] = {}
+    for world in config.worlds():
+        database = f"{world.repository}.db"
+        asset = assets.get(database)
+        if asset is None:
+            published[world.arch] = {}
             continue
         path = os.path.join(_cache_dir(), f"{tag}-{database}")
         if not os.path.exists(path):
             gh.download_asset(asset, path)
         with open(path, "rb") as handle:
-            return tag, parse_database(handle.read())
-    return tag, {}
+            published[world.arch] = parse_database(handle.read())
+    return tag, published
 
 
 def _cache_dir() -> str:

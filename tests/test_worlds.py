@@ -181,6 +181,28 @@ class TestStatusCarriesFacts(unittest.TestCase):
         status = report.build_status([], [], "rev", BOTH, generated_at=1234.0)
         self.assertEqual(status["generated_at"], 1234.0)
 
+class TestWhatIsAlreadyPublished(unittest.TestCase):
+    """Being in the repository is per world, like everything else."""
+
+    def test_a_dependent_published_in_one_world_only_blocks_there(self):
+        # Publishing zlib cannot break a libpng that was never published for
+        # that world, so it is held back in one and free in the other.
+        zlib = make_package("zlib", worlds=BOTH)
+        png = make_package("libpng", depends=["zlib"], worlds=BOTH)
+        packages = [zlib, png]
+        queue.link_dependencies(packages)
+        png.repo_versions["vita"] = "0.9-1"
+        apply(packages, done=["zlib-1.0-1-vita.pkg.tar.xz",
+                              "zlib-1.0-1-vita-musl.pkg.tar.xz"])
+        self.assertEqual(zlib.get_status(NEWLIB), PackageStatus.FINISHED_BUT_BLOCKED)
+        self.assertEqual(zlib.get_status(MUSL), PackageStatus.FINISHED)
+
+    def test_a_package_in_no_repository_is_new_everywhere(self):
+        zlib = make_package("zlib", worlds=BOTH)
+        self.assertTrue(zlib.is_new_in(NEWLIB))
+        self.assertTrue(zlib.is_new_in(MUSL))
+        self.assertEqual(zlib.repo_version, "")
+
 
 if __name__ == "__main__":
     unittest.main()

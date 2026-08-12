@@ -79,7 +79,7 @@ class Package:
 
         self.ext_depends: set["Package"] = set()
         self.ext_rdepends: set["Package"] = set()
-        self.repo_version: str = ""
+        self.repo_versions: dict[str, str] = {}
         self.builds: dict[str, dict[str, Any]] = {
             world.arch: {"status": PackageStatus.UNKNOWN, "details": {}}
             for world in self.worlds
@@ -95,10 +95,19 @@ class Package:
         return isinstance(other, Package) and other.name == self.name
 
     @property
-    def is_new(self) -> bool:
-        """True when no version of this package is in the published repository."""
+    def repo_version(self) -> str:
+        """What the published repository holds, for display."""
 
-        return not self.repo_version
+        return next((v for v in self.repo_versions.values() if v), "")
+
+    def is_new_in(self, world: World) -> bool:
+        """True when this package is not in the published repository of a world.
+
+        Publishing a package cannot break a dependent that was never published,
+        which is what keeps a first publication from blocking on itself.
+        """
+
+        return not self.repo_versions.get(world.arch)
 
     def builds_for(self, world: World) -> bool:
         return world.arch in self.builds
@@ -244,7 +253,7 @@ def is_optional_dep(package: Package, dependency: Package) -> bool:
     """
 
     return (dependency.name in config.OPTIONAL_DEPS.get(package.name, [])
-            and not dependency.is_new)
+            and dependency.repo_version != "")
 
 
 def is_manual(package: Package) -> bool:
@@ -313,7 +322,7 @@ def apply_status(packages: Iterable[Package], done_names: Iterable[str],
                     # A dependent that is not in the repository yet cannot be
                     # broken by publishing this one.
                     if (dependent.get_status(world) != PackageStatus.FINISHED
-                            and not dependent.is_new):
+                            and not dependent.is_new_in(world)):
                         package.set_blocked(world, PackageStatus.FINISHED_BUT_BLOCKED, dependent)
                         changed = True
 

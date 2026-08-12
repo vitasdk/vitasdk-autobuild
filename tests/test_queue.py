@@ -176,7 +176,7 @@ class TestStatus(unittest.TestCase):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        png.repo_version = "0.9-1"
+        png.repo_versions[WORLD.arch] = "0.9-1"
         apply(packages, ["zlib-1.0-1-vita.pkg.tar.xz"], [])
         self.assertEqual(zlib.get_status(WORLD), PackageStatus.FINISHED_BUT_BLOCKED)
         self.assertIn("libpng", zlib.get_details(WORLD)["desc"])
@@ -256,7 +256,7 @@ class TestOptionalDeps(unittest.TestCase):
         a = make_package("a", depends=["b"])
         b = make_package("b", depends=["a"])
         packages = queue_of(a, b)
-        b.repo_version = "0.9-1"
+        b.repo_versions[WORLD.arch] = "0.9-1"
         apply(packages, [], [])
         self.assertEqual(a.get_status(WORLD), PackageStatus.WAITING_FOR_BUILD)
 
