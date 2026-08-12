@@ -58,12 +58,46 @@ an unprivileged user**. Recipes are arbitrary code and the job holds a token
 that can write to the package store; running the build as another user puts a
 kernel boundary between the two.
 
-## The core SDK is pinned
+## Worlds
 
-`CORE_SNAPSHOT` in `config.py` names the core every staged package is built
-against. Changing it wipes the staging area, so a published snapshot is never
-a mixture of cores and `provenance.json` is exact. It only changes by commit,
-which is what removes the nightly full rebuild.
+A world is an architecture, a libc and a toolchain taken together, named by
+the target triple. pacman already carries it in a package's `arch` field, so
+nothing new was invented: `zlib-1.3.2-2-vita.pkg.tar.xz` belongs to the `vita`
+world and could not be confused with another one.
+
+```python
+WORLDS = [
+    World(arch="vita", core="sdk-snapshot-...", repository="vita",
+          triple="arm-vita-eabi"),
+]
+```
+
+One world is configured. A second toolchain or libc is a second entry, and
+everything follows from it: the state of every package is per world, and so
+are the file names, the failure markers, the dependency graph, the repository
+cut from a snapshot and the status file the catalogue reads.
+
+**The core is per world**, because the core *is* that world's toolchain and
+sysroot: autobuilds delivers one complete SDK per world. A worker's world is
+therefore decided by the image it runs in, not by a switch inside a shared
+SDK, and nothing needs to verify that — a build producing another
+architecture would not match the expected file name and fails instead of
+uploading something mislabelled.
+
+Bumping one world's core empties only that world's staged packages, so a
+snapshot never mixes cores, `provenance.json` is exact, and the other world
+stays publishable. It only changes by commit, which is what removes the
+nightly full rebuild.
+
+A recipe declares which worlds it supports with the standard `arch` array;
+declaring none means all of them. A world whose dependencies do not support it
+is pruned, and the pruning propagates, so a package is never built without a
+dependency it asked for.
+
+Two worlds are never installed against each other: their files live under
+different triples, and on a client each has its own pacman database, which is
+what lets both exist in one SDK without pacman treating one as an upgrade of
+the other.
 
 ## Commands
 
