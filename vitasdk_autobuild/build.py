@@ -70,7 +70,54 @@ def expected_outputs(package: Package, produced: Iterable[str]) -> list[str]:
     return found
 
 
+def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Runs the SDK's own pacman against the SDK prefix."""
+
+    return subprocess.run([
+        os.path.join(sdk, "bin", "pacman"),
+        "--config", os.path.join(sdk, "etc", "pacman.conf"),
+        "--root", sdk,
+        "--dbpath", os.path.join(sdk, "var", "lib", "pacman"),
+        "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
+        "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
+        "--noscriptlet", "--noconfirm", "--noprogressbar", *arguments,
+    ], check=check, capture_output=True, text=True)
+
+
+def installed_dependencies(sdk: str) -> list[str]:
+    """Packages present only because an earlier build needed them."""
+
+    if not os.path.exists(os.path.join(sdk, "var", "lib", "pacman")):
+        return []
+    result = pacman(sdk, "--query", "--deps", "--quiet", check=False)
+    return sorted(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+
+def reset_dependencies(sdk: str) -> list[str]:
+    """Returns the SDK to the state it was shipped in.
+
+    A worker builds many packages in a row into the same prefix, so what an
+    earlier build installed is still there. That is how openssl-1.1.1 ends up
+    refusing to install next to the openssl a previous package pulled in, and
+    every other way one build can quietly change the next one.
+    """
+
+    installed = installed_dependencies(sdk)
+    if installed:
+        print(f"Removing {len(installed)} package(s) from the previous build", flush=True)
+        # -dd: the removal order does not matter, they all go.
+        pacman(sdk, "--remove", "--nodeps", "--nodeps", *installed)
+    return installed
+
+
 def install_dependencies(assets: list[Asset], sdk: str) -> None:
+    # The bootstrap archive ships no var/ tree: vdpm and vita-makepkg create
+    # it on demand, and a direct pacman call has to do the same or pacman
+    # refuses the paths it is handed.
+    for relative in ("var/lib/pacman", "var/cache/pacman/pkg", "var/log"):
+        os.makedirs(os.path.join(sdk, relative), exist_ok=True)
+
+    reset_dependencies(sdk)
     if not assets:
         return
     directory = tempfile.mkdtemp(prefix="vitasdk-deps-")
@@ -82,22 +129,7 @@ def install_dependencies(assets: list[Asset], sdk: str) -> None:
             gh.download_asset(asset, path)
             paths.append(path)
 
-        # The bootstrap archive ships no var/ tree: vdpm and vita-makepkg
-        # create it on demand, and a direct pacman call has to do the same or
-        # pacman refuses the paths it is handed.
-        for relative in ("var/lib/pacman", "var/cache/pacman/pkg", "var/log"):
-            os.makedirs(os.path.join(sdk, relative), exist_ok=True)
-
-        subprocess.run([
-            os.path.join(sdk, "bin", "pacman"),
-            "--config", os.path.join(sdk, "etc", "pacman.conf"),
-            "--root", sdk,
-            "--dbpath", os.path.join(sdk, "var", "lib", "pacman"),
-            "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
-            "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
-            "--noscriptlet", "--noconfirm", "--noprogressbar",
-            "--upgrade", "--asdeps", "--needed", *paths,
-        ], check=True)
+        pacman(sdk, "--upgrade", "--asdeps", "--needed", *paths)
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 

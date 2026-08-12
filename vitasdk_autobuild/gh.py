@@ -106,7 +106,11 @@ def _request(method: str, url: str, *, data: bytes | BinaryIO | None = None,
                 last_error = e
                 continue
             try:
-                message = json.loads(body).get("message", body.decode("utf-8", "replace"))
+                parsed = json.loads(body)
+                message = parsed.get("message", "")
+                codes = [item.get("code", "") for item in parsed.get("errors", [])]
+                if codes:
+                    message = f"{message} ({', '.join(code for code in codes if code)})"
             except ValueError:
                 message = body.decode("utf-8", "replace")
             raise GitHubError(e.code, f"{method} {url}: {message}") from None
@@ -305,15 +309,24 @@ def upload_asset(release: Release, filename: str, *, path: str | None = None,
 
     query = urllib.parse.urlencode({"name": name, "label": label})
     url = f"{UPLOAD_ROOT}/repos/{release.repo}/releases/{release.id}/assets?{query}"
-    if content is not None:
-        _request("POST", url, data=content, length=len(content),
-                 headers={"Content-Type": "application/octet-stream"})
-    else:
-        assert path is not None
-        size = os.path.getsize(path)
-        with open(path, "rb") as handle:
-            _request("POST", url, data=handle, length=size,
+    try:
+        if content is not None:
+            _request("POST", url, data=content, length=len(content),
                      headers={"Content-Type": "application/octet-stream"})
+        else:
+            assert path is not None
+            size = os.path.getsize(path)
+            with open(path, "rb") as handle:
+                _request("POST", url, data=handle, length=size,
+                         headers={"Content-Type": "application/octet-stream"})
+    except GitHubError as e:
+        # Workers do not coordinate, so two of them can build the same package
+        # and race to upload it. Losing that race is not a failure: the file
+        # the queue was waiting for is there either way.
+        if e.status == 422 and "already_exists" in e.message:
+            print(f"{filename} was uploaded by another worker first", flush=True)
+            return
+        raise
     print(f"Uploaded {filename} to {release.tag}", flush=True)
 
 

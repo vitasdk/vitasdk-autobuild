@@ -131,11 +131,16 @@ def cmd_build(args: Any) -> None:
             break
 
         skip.add((package.name, package.version))
-        if build.build_one(package, snapshot.packages_dir, sdk,
-                           source_date_epoch(snapshot.packages_dir),
-                           state.staging_release(), state.failed_release(),
-                           snapshot.staging_assets):
-            built += 1
+        try:
+            if build.build_one(package, snapshot.packages_dir, sdk,
+                               source_date_epoch(snapshot.packages_dir),
+                               state.staging_release(), state.failed_release(),
+                               snapshot.staging_assets):
+                built += 1
+        except gh.GitHubError as e:
+            # Not the package's fault, so it gets no failure marker: move on
+            # and let this or another worker pick it up again.
+            print(f"::warning::{package.name}: {e}", flush=True)
 
     notice(f"Worker finished after building {built} package(s)")
 
