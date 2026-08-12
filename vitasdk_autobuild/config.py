@@ -135,9 +135,14 @@ CONFLICTING_DEPS: list[list[str]] = [
     ["openssl", "openssl-1.1.1"],
 ]
 
-# Users allowed to upload assets by hand. Anything uploaded by someone else
-# aborts the run instead of being trusted.
-ALLOWED_UPLOADERS: list[str] = []
+# Users allowed to upload assets by hand. Anything uploaded by anyone else
+# aborts the run rather than being trusted, because an asset in the staging
+# release is a package someone will install. Maintainers are listed here so a
+# manual repair or a hand-built package is possible without disabling the
+# check, which is how msys2 uses the same list.
+ALLOWED_UPLOADERS: list[str] = [
+    "frangarcj",
+]
 
 
 def apply_overrides(overrides: dict[str, Any]) -> None:
