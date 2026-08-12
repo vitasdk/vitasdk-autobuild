@@ -194,6 +194,35 @@ class TestSupervisorWorkflow(unittest.TestCase):
         self.assertIn("workflow_dispatch", triggers(self.document))
         self.assertNotIn("schedule", triggers(self.document))
 
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestMaintenanceWorkflow(unittest.TestCase):
+    """Unsticking a package must not require a local token."""
+
+    def setUp(self):
+        self.document = load(os.path.join(WORKFLOW_DIR, "maintenance.yml"))
+
+    def actions(self):
+        return triggers(self.document)["workflow_dispatch"]["inputs"]["action"]["options"]
+
+    def test_every_offered_action_is_a_real_command(self):
+        from vitasdk_autobuild import main
+        parser = main.build_parser()
+        known = {"staging-index": "snapshot"}
+        for action in self.actions():
+            with self.subTest(action=action):
+                command = known.get(action, action)
+                self.assertTrue(callable(parser.parse_args([command]).func))
+
+    def test_clearing_failures_is_offered(self):
+        # The one operation that a broken recipe cannot fix by itself.
+        self.assertIn("clear-failed", self.actions())
+
+    def test_it_can_write(self):
+        self.assertEqual(self.document["jobs"]["run"]["permissions"]["contents"], "write")
+
+    def test_it_is_only_manual(self):
+        self.assertEqual(list(triggers(self.document)), ["workflow_dispatch"])
+
 
 if __name__ == "__main__":
     unittest.main()

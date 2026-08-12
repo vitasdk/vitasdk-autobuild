@@ -1,0 +1,77 @@
+name: maintenance
+
+# The operations a maintainer needs now and then, runnable from the Actions
+# tab so that unsticking a package never requires a local checkout and a
+# token with write access.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        required: true
+        type: choice
+        default: show
+        options:
+          - show
+          - clear-failed
+          - clean-assets
+          - staging-index
+      pattern:
+        description: "For clear-failed: which markers to forget, e.g. icu4c-* (empty means all)"
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: Show what would happen without doing it
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: ${{ inputs.action }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTION: ${{ inputs.action }}
+          PATTERN: ${{ inputs.pattern }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          case "$ACTION" in
+            show)
+              arguments=(show)
+              ;;
+            clear-failed)
+              arguments=(clear-failed)
+              if [[ -n $PATTERN ]]; then
+                arguments+=(--pattern "$PATTERN")
+              fi
+              ;;
+            clean-assets)
+              arguments=(clean-assets)
+              ;;
+            staging-index)
+              arguments=(snapshot --staging --work-dir "$RUNNER_TEMP/repository")
+              ;;
+            *)
+              echo "::error::unknown action: $ACTION"
+              exit 1
+              ;;
+          esac
+          if [[ $DRY_RUN == 'true' && $ACTION != 'show' && $ACTION != 'staging-index' ]]; then
+            arguments+=(--dry-run)
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"
