@@ -12,14 +12,15 @@ from typing import Any
 
 from . import (build, build_plan, config, gh, queue, recipes, report, repository,
                srcinfo, state)
+from .config import World
 from .queue import Package, PackageStatus
 from .utils import group, notice, sanitize_tag, trust_git_checkouts
 
 WORKER_WORKFLOW = "build-jobs.yml"
 
 
-def image_tag(packages_dir: str | None = None) -> str:
-    """Identifies the build image by everything that can change what it holds.
+def image_tag(world: World, packages_dir: str | None = None) -> str:
+    """Identifies a world's build image by everything that decides what it holds.
 
     That is the core SDK it installs and the recipe repository's Dockerfile,
     which decides the host tools. Keying on both means the tag is immutable:
@@ -27,15 +28,21 @@ def image_tag(packages_dir: str | None = None) -> str:
     a stale image.
     """
 
-    tag = sanitize_tag(config.CORE_SNAPSHOT)
+    tag = sanitize_tag(world.core)
     if packages_dir:
         with open(os.path.join(packages_dir, "Dockerfile"), "rb") as handle:
             tag += "-" + hashlib.sha256(handle.read()).hexdigest()[:8]
     return tag
 
 
+def image_tags(packages_dir: str | None = None) -> dict[str, str]:
+    return {world.arch: image_tag(world, packages_dir) for world in config.worlds()}
+
+
 def cmd_image_tag(args: Any) -> None:
-    print(image_tag(state.packages_checkout()))
+    packages_dir = state.packages_checkout()
+    for world in config.worlds():
+        print(f"{world.arch} {image_tag(world, packages_dir)}")
 
 
 def source_date_epoch(packages_dir: str) -> str:
@@ -78,7 +85,7 @@ def collect_jobs() -> list[dict[str, str]]:
 
 def update_status(snapshot: state.Snapshot) -> None:
     status = report.build_status(snapshot.packages, collect_jobs(),
-                                 config.CORE_SNAPSHOT, snapshot.packages_revision)
+                                 snapshot.packages_revision)
     content = json.dumps(status, indent=2).encode() + b"\n"
     gh.upload_asset(state.status_release(), "status.json", content=content, replace=True)
 
@@ -89,7 +96,7 @@ def cmd_update_status(args: Any) -> None:
 
 # ---------------------------------------------------------------- build
 
-def pick_package(packages: list[Package], build_from: str,
+def pick_package(packages: list[Package], world: World, build_from: str,
                  skip: set[tuple[str, str]]) -> Package | None:
     """Next package to build, approached from one end of the queue.
 
@@ -99,7 +106,8 @@ def pick_package(packages: list[Package], build_from: str,
     """
 
     ready = [p for p in packages
-             if p.status == PackageStatus.WAITING_FOR_BUILD
+             if p.builds_for(world)
+             and p.get_status(world) == PackageStatus.WAITING_FOR_BUILD
              and (p.name, p.version) not in skip]
     if not ready:
         return None
@@ -112,9 +120,11 @@ def pick_package(packages: list[Package], build_from: str,
 
 def cmd_build(args: Any) -> None:
     trust_git_checkouts()
+    world = config.world_by_arch(args.world) if args.world else config.default_world()
     sdk = os.environ.get("VITASDK")
     if not sdk or not os.path.isdir(sdk):
         raise SystemExit("ERROR: VITASDK must point at an installed SDK")
+    print(f"Building for {world.arch} against {world.core}", flush=True)
 
     started = time.monotonic()
     skip: set[tuple[str, str]] = set()
@@ -125,14 +135,14 @@ def cmd_build(args: Any) -> None:
             break
 
         snapshot = state.get_queue_with_status()
-        package = pick_package(snapshot.packages, args.build_from, skip)
+        package = pick_package(snapshot.packages, world, args.build_from, skip)
         if package is None:
             print("Nothing left to build", flush=True)
             break
 
         skip.add((package.name, package.version))
         try:
-            if build.build_one(package, snapshot.packages_dir, sdk,
+            if build.build_one(package, world, snapshot.packages_dir, sdk,
                                source_date_epoch(snapshot.packages_dir),
                                state.staging_release(), state.failed_release(),
                                snapshot.staging_assets):
@@ -152,17 +162,18 @@ def drop_stale_dependents(snapshot: state.Snapshot, dry_run: bool) -> int:
 
     if not config.REBUILD_DEPENDENTS:
         return 0
-    stale = queue.find_stale_packages(snapshot.packages, snapshot.built_at)
-    if not stale:
-        return 0
 
     by_name = {asset.filename: asset for asset in snapshot.staging_assets}
     staging = state.staging_release()
     dropped = 0
-    with group(f"Rebuilding {len(stale)} package(s) built before their dependencies"):
-        for package in sorted(stale, key=lambda p: p.name):
-            for pattern in package.build_patterns():
-                for name in sorted(fnmatch.filter(by_name, pattern)):
+    for world in config.worlds():
+        stale = queue.find_stale_packages(snapshot.packages, snapshot.built_at, world)
+        if not stale:
+            continue
+        with group(f"[{world.arch}] rebuilding {len(stale)} package(s) "
+                   f"built before their dependencies"):
+            for package in sorted(stale, key=lambda p: p.name):
+                for name in queue.asset_names(package, world, by_name):
                     print(f"{package.name}: dropping {name}", flush=True)
                     if not dry_run:
                         gh.delete_asset(staging.repo, by_name[name])
@@ -173,8 +184,8 @@ def drop_stale_dependents(snapshot: state.Snapshot, dry_run: bool) -> int:
 def cmd_supervise(args: Any) -> None:
     repo = gh.get_current_repo()
 
-    if state.enforce_core_pin(dry_run=args.dry_run):
-        notice(f"Staging area reset for core {config.CORE_SNAPSHOT}")
+    for world in state.enforce_core_pin(dry_run=args.dry_run):
+        notice(f"Staged packages for {world.arch} dropped: rebuilding against {world.core}")
 
     snapshot = state.get_queue_with_status(full_details=True,
                                            create_releases=not args.dry_run)
@@ -185,7 +196,7 @@ def cmd_supervise(args: Any) -> None:
     if not args.dry_run:
         update_status(snapshot)
 
-    plan = build_plan.create_build_plan(snapshot.packages, image_tag(snapshot.packages_dir))
+    plan = build_plan.create_build_plan(snapshot.packages, image_tags(snapshot.packages_dir))
     if not plan:
         notice("Nothing to build")
         return
@@ -225,40 +236,51 @@ def cmd_supervise(args: Any) -> None:
 def cmd_snapshot(args: Any) -> None:
     snapshot = state.get_queue_with_status()
     include_blocked = args.staging or args.include_blocked
-    packages = repository.selectable(snapshot.packages, include_blocked)
-    if not packages:
-        raise SystemExit("ERROR: no finished packages to publish")
+    work_dir = args.work_dir or tempfile.mkdtemp(prefix="vitasdk-repo-")
 
-    assets = repository.select_assets(packages, snapshot.staging_assets)
-    name = config.STAGING_REPOSITORY_NAME if args.staging else config.REPOSITORY_NAME
-    original_name = config.REPOSITORY_NAME
-    config.REPOSITORY_NAME = name
-    try:
-        work_dir = args.work_dir or tempfile.mkdtemp(prefix="vitasdk-repo-")
-        packages_dir = os.path.join(work_dir, "packages")
-        output_dir = os.path.join(work_dir, "repository")
+    # One repository per world, side by side. Their file names differ by
+    # architecture, so they never collide and a client picks the one it wants.
+    outputs: dict[str, str] = {}
+    total = 0
+    for world in config.worlds():
+        packages = repository.selectable(snapshot.packages, world, include_blocked)
+        if not packages:
+            notice(f"[{world.arch}] nothing publishable, skipped")
+            continue
+        assets = repository.select_assets(packages, world, snapshot.staging_assets)
+        name = world.staging_repository if args.staging else world.repository
+        packages_dir = os.path.join(work_dir, world.arch, "packages")
+        output_dir = os.path.join(work_dir, world.arch, name)
         repository.download(assets, packages_dir)
         repository.create_database(snapshot.packages_dir, packages_dir, output_dir,
-                                   source_date_epoch(snapshot.packages_dir))
-    finally:
-        config.REPOSITORY_NAME = original_name
+                                   source_date_epoch(snapshot.packages_dir), name)
+        outputs[world.arch] = output_dir
+        total += len(packages)
+        notice(f"[{world.arch}] repository with {len(packages)} package(s)")
 
-    notice(f"Repository with {len(packages)} package(s) built in {output_dir}")
+    if not outputs:
+        raise SystemExit("ERROR: no finished packages to publish")
 
     if args.staging:
         staging = state.staging_release()
-        for entry in sorted(os.listdir(output_dir)):
-            if entry.endswith((".db", ".files", ".db.tar.gz", ".files.tar.gz")):
-                gh.upload_asset(staging, entry,
-                                path=os.path.join(output_dir, entry), replace=True)
+        for output_dir in outputs.values():
+            for entry in sorted(os.listdir(output_dir)):
+                if entry.endswith((".db", ".files", ".db.tar.gz", ".files.tar.gz")):
+                    gh.upload_asset(staging, entry,
+                                    path=os.path.join(output_dir, entry), replace=True)
         notice("Staging repository index updated")
         return
 
-    repository.write_provenance(output_dir, snapshot.packages_revision,
+    combined = os.path.join(work_dir, "release")
+    os.makedirs(combined, exist_ok=True)
+    for output_dir in outputs.values():
+        for entry in sorted(os.listdir(output_dir)):
+            os.replace(os.path.join(output_dir, entry), os.path.join(combined, entry))
+    repository.write_provenance(combined, snapshot.packages_revision,
                                 args.buildscripts_revision)
     if args.no_publish:
         return
-    publish_snapshot(output_dir, len(packages))
+    publish_snapshot(combined, total)
 
 
 def publish_snapshot(output_dir: str, package_count: int) -> str:
@@ -280,14 +302,18 @@ def publish_snapshot(output_dir: str, package_count: int) -> str:
 
 def cmd_clean_assets(args: Any) -> None:
     snapshot = state.get_queue_with_status()
-    keep = {config.CORE_MARKER_ASSET}
+    keep = {config.LEGACY_CORE_MARKER, "SHA256SUMS"}
     patterns = []
-    for package in snapshot.packages:
-        patterns.extend(package.build_patterns())
-        keep.add(package.failed_name())
-    for name in (config.STAGING_REPOSITORY_NAME, config.REPOSITORY_NAME):
-        keep.update({f"{name}.db", f"{name}.files",
-                     f"{name}.db.tar.gz", f"{name}.files.tar.gz", "SHA256SUMS"})
+    for world in config.worlds():
+        keep.add(world.core_marker)
+        for name in (world.staging_repository, world.repository):
+            keep.update({f"{name}.db", f"{name}.files",
+                         f"{name}.db.tar.gz", f"{name}.files.tar.gz"})
+        for package in snapshot.packages:
+            if not package.builds_for(world):
+                continue
+            patterns.extend(package.build_patterns(world))
+            keep.add(package.failed_name(world))
     matcher = re.compile("|".join(fnmatch.translate(p) for p in patterns)) if patterns else None
 
     for release, assets in ((state.staging_release(), snapshot.staging_assets),

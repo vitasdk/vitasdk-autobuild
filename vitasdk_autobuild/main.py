@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     worker = subparsers.add_parser(
         "build", help="build packages from the queue until it is empty")
+    worker.add_argument("--world", help="which world to build for, by architecture")
     worker.add_argument("--build-from", choices=["start", "middle", "end"], default="start",
                         help="which end of the queue this worker starts from")
     worker.set_defaults(func=commands.cmd_build)

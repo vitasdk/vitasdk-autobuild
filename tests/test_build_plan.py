@@ -3,7 +3,15 @@ import unittest
 from vitasdk_autobuild import build_plan, config, queue
 from vitasdk_autobuild.queue import PackageStatus
 
-from .test_queue import make_package, queue_of
+from .test_queue import WORLD, make_package, queue_of
+
+
+def apply_status(packages, done, failed):
+    queue.apply_status(packages, done, failed, None, [WORLD])
+
+
+def plan(packages, tag="tag"):
+    return build_plan.create_build_plan(packages, {WORLD.arch: tag}, [WORLD])
 
 
 class TestJobCount(unittest.TestCase):
@@ -30,39 +38,41 @@ class TestBuildPlan(unittest.TestCase):
 
     def test_plan_is_empty_when_nothing_waits(self):
         package = make_package("zlib")
-        queue.apply_status([package], ["zlib-1.0-1-vita.pkg.tar.xz"], [])
-        self.assertEqual(build_plan.create_build_plan([package], "tag"), [])
+        apply_status([package], ["zlib-1.0-1-vita.pkg.tar.xz"], [])
+        self.assertEqual(plan([package]), [])
 
     def test_blocked_packages_do_not_ask_for_workers(self):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, ["zlib-1.0-1-vita.pkg.tar.xz"], [])
-        png.set_status(PackageStatus.WAITING_FOR_DEPENDENCIES)
-        self.assertEqual(build_plan.create_build_plan(packages, "tag"), [])
+        apply_status(packages, ["zlib-1.0-1-vita.pkg.tar.xz"], [])
+        png.set_status(WORLD, PackageStatus.WAITING_FOR_DEPENDENCIES)
+        self.assertEqual(plan(packages), [])
 
     def test_job_names_are_unique(self):
         packages = [make_package(f"p{i}") for i in range(60)]
-        queue.apply_status(packages, [], [])
-        plan = build_plan.create_build_plan(packages, "tag")
-        names = [job["name"] for job in plan]
+        apply_status(packages, [], [])
+        jobs = plan(packages)
+        names = [job["name"] for job in jobs]
         self.assertEqual(len(names), len(set(names)))
-        self.assertEqual(names[0], "build")
+        self.assertEqual(names[0], WORLD.arch)
 
     def test_workers_start_from_different_ends(self):
         packages = [make_package(f"p{i}") for i in range(60)]
-        queue.apply_status(packages, [], [])
-        plan = build_plan.create_build_plan(packages, "tag")
-        positions = [job["build-args"] for job in plan[:3]]
+        apply_status(packages, [], [])
+        jobs = plan(packages)
+        positions = [job["build-args"] for job in jobs[:3]]
         self.assertEqual(positions, [
-            "--build-from start", "--build-from end", "--build-from middle"])
+            "--world vita --build-from start",
+            "--world vita --build-from end",
+            "--world vita --build-from middle"])
 
     def test_image_tag_is_passed_to_every_worker(self):
         packages = [make_package("zlib")]
-        queue.apply_status(packages, [], [])
-        plan = build_plan.create_build_plan(packages, "sdk-snapshot-20260812.565.1")
+        apply_status(packages, [], [])
+        jobs = plan(packages, "sdk-snapshot-20260812.565.1")
         self.assertTrue(all(job["image-tag"] == "sdk-snapshot-20260812.565.1"
-                            for job in plan))
+                            for job in jobs))
 
 
 class TestStalePackages(unittest.TestCase):
@@ -75,8 +85,8 @@ class TestStalePackages(unittest.TestCase):
             "libpng-1.0-1-vita.pkg.tar.xz": 100.0,
             "zlib-1.0-1-vita.pkg.tar.xz": 200.0,
         }
-        queue.apply_status(packages, list(built_at), [])
-        self.assertEqual(queue.find_stale_packages(packages, built_at), [png])
+        apply_status(packages, list(built_at), [])
+        self.assertEqual(queue.find_stale_packages(packages, built_at, WORLD), [png])
 
     def test_dependent_built_after_its_dependency_is_current(self):
         zlib = make_package("zlib")
@@ -86,8 +96,8 @@ class TestStalePackages(unittest.TestCase):
             "zlib-1.0-1-vita.pkg.tar.xz": 100.0,
             "libpng-1.0-1-vita.pkg.tar.xz": 200.0,
         }
-        queue.apply_status(packages, list(built_at), [])
-        self.assertEqual(queue.find_stale_packages(packages, built_at), [])
+        apply_status(packages, list(built_at), [])
+        self.assertEqual(queue.find_stale_packages(packages, built_at, WORLD), [])
 
     def test_rebuilding_clears_the_staleness(self):
         # The point of comparing times: after the rebuild the same input says
@@ -99,15 +109,15 @@ class TestStalePackages(unittest.TestCase):
             "libpng-1.0-1-vita.pkg.tar.xz": 300.0,
             "zlib-1.0-1-vita.pkg.tar.xz": 200.0,
         }
-        queue.apply_status(packages, list(built_at), [])
-        self.assertEqual(queue.find_stale_packages(packages, built_at), [])
+        apply_status(packages, list(built_at), [])
+        self.assertEqual(queue.find_stale_packages(packages, built_at, WORLD), [])
 
     def test_unbuilt_packages_are_not_stale(self):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, [], [])
-        self.assertEqual(queue.find_stale_packages(packages, {}), [])
+        apply_status(packages, [], [])
+        self.assertEqual(queue.find_stale_packages(packages, {}, WORLD), [])
 
     def test_staleness_reaches_the_whole_chain_one_step_at_a_time(self):
         a = make_package("a")
@@ -119,8 +129,8 @@ class TestStalePackages(unittest.TestCase):
             "b-1.0-1-vita.pkg.tar.xz": 100.0,
             "a-1.0-1-vita.pkg.tar.xz": 200.0,
         }
-        queue.apply_status(packages, list(built_at), [])
-        self.assertEqual(queue.find_stale_packages(packages, built_at), [b])
+        apply_status(packages, list(built_at), [])
+        self.assertEqual(queue.find_stale_packages(packages, built_at, WORLD), [b])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from typing import Any, Iterable
 
 from . import config
+from .config import World
 from .queue import Package, PackageStatus, get_cycles
 from .utils import group, table
 
@@ -12,53 +13,80 @@ WAITING_STATES = (PackageStatus.WAITING_FOR_DEPENDENCIES,
 DONE_STATES = (PackageStatus.FINISHED, PackageStatus.FINISHED_BUT_BLOCKED)
 
 
-def show_queue(packages: Iterable[Package]) -> None:
+def show_queue(packages: Iterable[Package], worlds: Iterable[World] | None = None) -> None:
     packages = list(packages)
-    buckets: dict[str, list[Package]] = {"TODO": [], "WAITING": [], "FAILED": [], "DONE": []}
-    for package in packages:
-        if package.status in TODO_STATES:
-            buckets["TODO"].append(package)
-        elif package.status in WAITING_STATES:
-            buckets["WAITING"].append(package)
-        elif package.status in DONE_STATES:
-            buckets["DONE"].append(package)
-        else:
-            buckets["FAILED"].append(package)
+    configured = list(worlds) if worlds is not None else config.worlds()
 
-    cycles = get_cycles(packages)
-    if cycles:
-        with group(f"Dependency cycles ({len(cycles)})"):
-            print(table(["Package", "", "Package"],
-                        [(a, "<-->", b) for a, b in cycles]))
+    for world in configured:
+        buckets: dict[str, list[Package]] = {"TODO": [], "WAITING": [], "FAILED": [], "DONE": []}
+        for package in packages:
+            if not package.builds_for(world):
+                continue
+            status = package.get_status(world)
+            if status in TODO_STATES:
+                buckets["TODO"].append(package)
+            elif status in WAITING_STATES:
+                buckets["WAITING"].append(package)
+            elif status in DONE_STATES:
+                buckets["DONE"].append(package)
+            else:
+                buckets["FAILED"].append(package)
 
-    for name, bucket in buckets.items():
-        with group(f"{name} ({len(bucket)})"):
-            print(table(
-                ["Package", "Version", "In repository", "Status", "Details"],
-                [(p.name, p.version, p.repo_version or "-", str(p.status),
-                  p.details.get("desc") or "") for p in sorted(bucket, key=lambda p: p.name)]))
+        cycles = get_cycles(packages, world)
+        if cycles:
+            with group(f"[{world.arch}] Dependency cycles ({len(cycles)})"):
+                print(table(["Package", "", "Package"],
+                            [(a, "<-->", b) for a, b in cycles]))
+
+        for name, bucket in buckets.items():
+            with group(f"[{world.arch}] {name} ({len(bucket)})"):
+                print(table(
+                    ["Package", "Version", "In repository", "Status", "Details"],
+                    [(p.name, p.version, p.repo_version or "-", str(p.get_status(world)),
+                      p.get_details(world).get("desc") or "")
+                     for p in sorted(bucket, key=lambda p: p.name)]))
 
 
-def summary_line(packages: Iterable[Package]) -> str:
-    counts: dict[str, int] = {}
-    for package in packages:
-        counts[str(package.status)] = counts.get(str(package.status), 0) + 1
-    return ", ".join(f"{count} {name}" for name, count in sorted(counts.items()))
+def summary_line(packages: Iterable[Package], worlds: Iterable[World] | None = None) -> str:
+    packages = list(packages)
+    configured = list(worlds) if worlds is not None else config.worlds()
+    parts = []
+    for world in configured:
+        counts: dict[str, int] = {}
+        for package in packages:
+            if not package.builds_for(world):
+                continue
+            key = str(package.get_status(world))
+            counts[key] = counts.get(key, 0) + 1
+        summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items()))
+        parts.append(f"{world.arch}: {summary}" if len(configured) > 1 else summary)
+    return " | ".join(parts)
 
 
 def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
-                 core_snapshot: str, packages_revision: str) -> dict[str, Any]:
+                 packages_revision: str,
+                 worlds: Iterable[World] | None = None) -> dict[str, Any]:
     """The machine readable state, uploaded as status.json.
 
     This is the only thing the website reads, so it has to carry everything a
-    catalogue page needs without a second request.
+    catalogue page needs without a second request, for every world.
     """
 
     packages = sorted(packages, key=lambda p: p.name)
+    configured = list(worlds) if worlds is not None else config.worlds()
+
     entries = []
     for package in packages:
-        details = dict(package.details)
-        details.pop("blocked", None)
+        builds = {}
+        for world in configured:
+            if not package.builds_for(world):
+                continue
+            details = dict(package.get_details(world))
+            details.pop("blocked", None)
+            builds[world.arch] = {
+                "status": str(package.get_status(world)),
+                "details": details,
+            }
         entries.append({
             "name": package.name,
             "version": package.version,
@@ -69,18 +97,27 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
             "binaries": sorted(package.binaries),
             "depends": sorted(p.name for p in package.ext_depends),
             "rdepends": sorted(p.name for p in package.ext_rdepends),
-            "status": str(package.status),
-            "details": details,
+            "builds": builds,
         })
 
     return {
-        "schema_version": 1,
-        "core_snapshot": core_snapshot,
+        "schema_version": 2,
+        "worlds": [
+            {
+                "arch": world.arch,
+                "core": world.core,
+                "repository": world.repository,
+                "staging_repository": world.staging_repository,
+                "description": world.description,
+            }
+            for world in configured
+        ],
         "packages_repo": config.PACKAGES_REPO,
         "packages_revision": packages_revision,
         "jobs": jobs,
         "packages": entries,
-        "cycles": [list(pair) for pair in get_cycles(packages)],
+        "cycles": {world.arch: [list(pair) for pair in get_cycles(packages, world)]
+                   for world in configured},
     }
 
 

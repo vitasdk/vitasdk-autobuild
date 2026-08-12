@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from . import config, gh, queue, repodb
+from .config import World
 from .queue import Package
 from .utils import give_to_build_user, run
 
@@ -91,6 +92,16 @@ class Snapshot:
         return {asset.filename: asset.created_at for asset in self.staging_assets}
 
 
+def assets_of_world(assets: list[gh.Asset], world: World) -> list[gh.Asset]:
+    """Assets belonging to one world, by the architecture in their name."""
+
+    import fnmatch
+    patterns = (f"*-{world.arch}.pkg.tar.*", f"*-{world.arch}.failed", world.core_marker,
+                f"{world.staging_repository}.*", f"{world.repository}.*")
+    return [a for a in assets
+            if any(fnmatch.fnmatch(a.filename, p) for p in patterns)]
+
+
 def get_queue_with_status(full_details: bool = False,
                           create_releases: bool = True) -> Snapshot:
     """The build queue, with every package's state resolved.
@@ -138,37 +149,49 @@ def get_queue_with_status(full_details: bool = False,
     )
 
 
-def get_core_marker(create: bool = True) -> str:
-    """The core snapshot the staged packages were built against."""
+def get_core_marker(world: World, create: bool = True) -> str:
+    """The core a world's staged packages were built against."""
 
-    for asset in assets_of(staging_release, create):
-        if asset.filename == config.CORE_MARKER_ASSET:
-            return gh.download_asset_text(asset).strip()
-    return ""
+    assets = {a.filename: a for a in assets_of(staging_release, create)}
+    asset = assets.get(world.core_marker)
+    if asset is None and world is config.default_world():
+        # Written before worlds existed. Reading it keeps a staging area that
+        # is already correct from being thrown away on the first run.
+        asset = assets.get(config.LEGACY_CORE_MARKER)
+    return gh.download_asset_text(asset).strip() if asset is not None else ""
 
 
-def enforce_core_pin(dry_run: bool = False) -> bool:
-    """Drops the staging area when the core it was built against changed.
+def enforce_core_pin(dry_run: bool = False) -> list[World]:
+    """Drops the staged packages of any world whose core pin changed.
 
     A snapshot must never mix packages built against different cores, so
-    bumping the pin is what triggers a full rebuild. Returns True if anything
-    was dropped.
+    bumping a pin is what triggers that world's full rebuild. Only that
+    world's files go: the others stay publishable, which is possible because
+    every file name carries its architecture.
     """
 
-    staged = get_core_marker(create=not dry_run)
-    if staged == config.CORE_SNAPSHOT:
-        return False
+    reset: list[World] = []
+    for world in config.worlds():
+        staged = get_core_marker(world, create=not dry_run)
+        if staged == world.core:
+            continue
 
-    print(f"Core pin changed: staged against {staged or '(nothing)'}, "
-          f"configured {config.CORE_SNAPSHOT}", flush=True)
-    if dry_run:
-        return True
+        print(f"[{world.arch}] core pin changed: staged against "
+              f"{staged or '(nothing)'}, configured {world.core}", flush=True)
+        reset.append(world)
+        if dry_run:
+            continue
 
-    for release in (staging_release(), failed_release()):
-        for asset in gh.get_assets(release, include_incomplete=True):
-            print(f"Deleting {asset.filename} from {release.tag}", flush=True)
-            gh.delete_asset(release.repo, asset)
+        for release in (staging_release(), failed_release()):
+            for asset in assets_of_world(
+                    gh.get_assets(release, include_incomplete=True), world):
+                print(f"Deleting {asset.filename} from {release.tag}", flush=True)
+                gh.delete_asset(release.repo, asset)
+        if world is config.default_world():
+            for asset in gh.get_assets(staging_release(), include_incomplete=True):
+                if asset.filename == config.LEGACY_CORE_MARKER:
+                    gh.delete_asset(staging_release().repo, asset)
 
-    gh.upload_asset(staging_release(), config.CORE_MARKER_ASSET,
-                    content=(config.CORE_SNAPSHOT + "\n").encode(), replace=True)
-    return True
+        gh.upload_asset(staging_release(), world.core_marker,
+                        content=(world.core + "\n").encode(), replace=True)
+    return reset

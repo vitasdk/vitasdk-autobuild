@@ -132,13 +132,16 @@ class TestReusableWorkflowCalls(unittest.TestCase):
         self.assertTrue(list(self.called_workflows()))
 
     def test_callers_grant_what_the_called_workflow_needs(self):
+        # A called workflow can hold no more than its caller, and the strictest
+        # job in it decides what the caller has to hand over.
+        levels = {None: 0, "none": 0, "read": 1, "write": 2}
         for path, job_name, job, called_path in self.called_workflows():
             granted = job.get("permissions") or {}
             for called_job, called in load(called_path)["jobs"].items():
                 for scope, level in (called.get("permissions") or {}).items():
                     with self.subTest(caller=os.path.basename(path), job=job_name,
                                       called=called_job, scope=scope):
-                        self.assertEqual(granted.get(scope), level)
+                        self.assertGreaterEqual(levels[granted.get(scope)], levels[level])
 
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")

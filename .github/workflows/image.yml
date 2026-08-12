@@ -1,32 +1,36 @@
 name: image
 
-# The build image is the recipe repository's Dockerfile with a pinned core SDK
-# inside. It is tagged by both, so an existing tag is never rebuilt and a
-# changed input never reuses a stale image.
+# One build image per world. A world is a complete SDK for one EABI, so its
+# image is that SDK installed into the recipe repository's build environment,
+# and the world a worker builds for is decided by the image it runs in.
+#
+# The tag is the core snapshot plus the hash of the Dockerfile, so it is
+# immutable: an existing tag is never rebuilt and a changed input never reuses
+# a stale image.
 
 on:
   workflow_dispatch:
   workflow_call:
     outputs:
+      tags:
+        description: JSON mapping of world architecture to image tag
+        value: ${{ jobs.plan.outputs.tags }}
       tag:
-        description: Tag of the build image the workers must use
-        value: ${{ jobs.image.outputs.tag }}
-      image:
-        description: Full reference of the build image
-        value: ${{ jobs.image.outputs.image }}
+        description: Tag of the first world's image, for jobs that need only one
+        value: ${{ jobs.plan.outputs.tag }}
 
 permissions: {}
 
 jobs:
-  image:
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 20
     permissions:
       contents: read
-      packages: write
     outputs:
+      tags: ${{ steps.identify.outputs.tags }}
       tag: ${{ steps.identify.outputs.tag }}
-      image: ${{ steps.identify.outputs.image }}
+      matrix: ${{ steps.identify.outputs.matrix }}
     env:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
     steps:
@@ -34,19 +38,49 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Identify the image
+      - name: Identify one image per world
         id: identify
         shell: bash
         run: |
-          tag=$(python3 -m vitasdk_autobuild image-tag)
-          core=$(python3 -c 'from vitasdk_autobuild import config; print(config.CORE_SNAPSHOT)')
-          image="ghcr.io/${GITHUB_REPOSITORY@L}/build:${tag}"
-          {
-            echo "tag=$tag"
-            echo "image=$image"
-            echo "core=$core"
-          } >> "$GITHUB_OUTPUT"
-          echo "Build image: $image (core $core)"
+          # image-tag prints "<arch> <tag>", one line per world.
+          python3 -m vitasdk_autobuild image-tag > "$RUNNER_TEMP/tags"
+          cat "$RUNNER_TEMP/tags"
+          python3 - "$RUNNER_TEMP/tags" >> "$GITHUB_OUTPUT" <<'PYTHON'
+          import json, sys
+          from vitasdk_autobuild import config
+
+          tags = dict(line.split() for line in open(sys.argv[1]) if line.strip())
+          cores = {world.arch: world.core for world in config.worlds()}
+          matrix = [{"arch": arch, "tag": tag, "core": cores[arch]}
+                    for arch, tag in tags.items()]
+          print("tags=" + json.dumps(tags))
+          print("matrix=" + json.dumps(matrix))
+          print("tag=" + matrix[0]["tag"])
+          PYTHON
+
+  build:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.arch }}
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Name the image
+        id: name
+        shell: bash
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY@L}/build:${{ matrix.tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -59,12 +93,16 @@ jobs:
         id: check
         shell: bash
         run: |
-          if docker manifest inspect '${{ steps.identify.outputs.image }}' >/dev/null 2>&1; then
+          if docker manifest inspect '${{ steps.name.outputs.image }}' >/dev/null 2>&1; then
             echo 'exists=true' >> "$GITHUB_OUTPUT"
             echo 'Image already published, nothing to build.'
           else
             echo 'exists=false' >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Fetch the recipes for their Dockerfile
+        if: steps.check.outputs.exists == 'false'
+        run: python3 -m vitasdk_autobuild image-tag >/dev/null
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.exists == 'false'
@@ -76,8 +114,8 @@ jobs:
         with:
           context: ${{ env.VITASDK_AUTOBUILD_CACHE }}/packages
           push: true
-          tags: ${{ steps.identify.outputs.image }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.name.outputs.image }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
           build-args: |
-            CORE_SNAPSHOT=${{ steps.identify.outputs.core }}
+            CORE_SNAPSHOT=${{ matrix.core }}

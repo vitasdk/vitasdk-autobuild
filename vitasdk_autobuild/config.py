@@ -4,7 +4,54 @@ Everything that decides *what* gets built lives here, so that changing the
 plan is a reviewable commit and never a click in a web UI.
 """
 
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass(frozen=True)
+class World:
+    """One target the catalogue is built for.
+
+    A world is an architecture, a libc and a toolchain taken together, and it
+    is named by the target triple, which pacman carries in the `arch` field of
+    a package. Two worlds never mix: their file names differ, their
+    repositories differ, and their files land under different triples inside
+    the same SDK.
+    """
+
+    arch: str
+    """CARCH, and therefore the architecture in every file name of this world."""
+
+    core: str
+    """The core SDK snapshot this world's packages are built against.
+
+    One complete, working SDK per world, which is what autobuilds already
+    produces today for the single world that exists. A second world means a
+    second such snapshot, not a second sysroot inside this one: the world a
+    worker builds for is decided by the image it runs in.
+    """
+
+    repository: str
+    """Name of the published pacman repository for this world."""
+
+    triple: str = ""
+    """Install prefix inside the SDK. Defaults to the arch when unset."""
+
+    description: str = ""
+
+    @property
+    def prefix(self) -> str:
+        return self.triple or self.arch
+
+    @property
+    def staging_repository(self) -> str:
+        return f"{self.repository}-staging"
+
+    @property
+    def core_marker(self) -> str:
+        """Asset recording which core this world's staged packages come from."""
+
+        return f"core-{self.arch}.txt"
 
 # The recipe repository. It is read, never written: adding a library must not
 # require touching the scheduler, and changing the scheduler must not need
@@ -19,21 +66,21 @@ PACKAGES_BRANCH = "next"
 VITA_MAKEPKG_REPO = "vitasdk/vita-makepkg"
 VITA_MAKEPKG_REF = "32f863c2a58a801b7d5a0296bdbbb443c9676e08"
 
-# The core SDK every package in the staging area is built against. Bumping it
-# invalidates the whole staging area, so a snapshot never mixes cores.
-CORE_SNAPSHOT = "sdk-snapshot-20260812.565.1"
-
-# Package architecture, matching CARCH in the SDK's makepkg.conf.
-ARCH = "vita"
-
-# Name of the pacman repository inside a published snapshot. Matches the
-# default of scripts/create-repository.sh in vitasdk/packages.
-REPOSITORY_NAME = "vita"
-
-# Name of the repository generated inside the staging release, which anyone
-# can add to pacman.conf to get packages before they are published. It carries
-# partial results of a rebuild by design, so it is deliberately not "vita".
-STAGING_REPOSITORY_NAME = "vita-staging"
+# The worlds the catalogue is built for. One entry today; a second toolchain
+# or libc is a second entry, and nothing else in this program has to change.
+#
+# The core is per world because the core *is* that world's toolchain and
+# sysroot. Bumping one world's core empties only that world's staged packages,
+# so a snapshot never mixes cores and the other world stays publishable.
+WORLDS: list[World] = [
+    World(
+        arch="vita",
+        core="sdk-snapshot-20260812.565.1",
+        repository="vita",
+        triple="arm-vita-eabi",
+        description="gcc and newlib",
+    ),
+]
 
 # Rebuild a package when something it links against was rebuilt after it.
 # Vita packages are mostly static libraries, so a dependent built against an
@@ -46,9 +93,10 @@ STAGING_RELEASE = "staging"
 FAILED_RELEASE = "staging-failed"
 STATUS_RELEASE = "status"
 
-# Asset inside STAGING_RELEASE recording which core the staged packages were
-# built against.
-CORE_MARKER_ASSET = "core-snapshot.txt"
+# Marker written before worlds existed. Read as the first world's marker when
+# the per-world one is absent, so introducing worlds does not throw away a
+# staging area that is already correct.
+LEGACY_CORE_MARKER = "core-snapshot.txt"
 
 # Prefix of the immutable snapshot releases cut from the staging area.
 SNAPSHOT_PREFIX = "packages-snapshot-"
@@ -99,3 +147,21 @@ def apply_overrides(overrides: dict[str, Any]) -> None:
         if key not in globals() or key.startswith("_") or not key.isupper():
             raise SystemExit(f"ERROR: unknown configuration key: {key}")
         globals()[key] = value
+
+
+def worlds() -> list[World]:
+    return list(WORLDS)
+
+
+def default_world() -> World:
+    if not WORLDS:
+        raise SystemExit("ERROR: no worlds configured")
+    return WORLDS[0]
+
+
+def world_by_arch(arch: str) -> World:
+    for world in WORLDS:
+        if world.arch == arch:
+            return world
+    known = ", ".join(w.arch for w in WORLDS) or "none"
+    raise SystemExit(f"ERROR: unknown world {arch!r}; configured: {known}")

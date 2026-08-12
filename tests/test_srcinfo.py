@@ -120,10 +120,12 @@ class TestConfFile(unittest.TestCase):
         self.assertTrue(os.path.exists(srcinfo.SRCINFO_CONF))
 
     def test_conf_declares_the_architecture_used_for_file_names(self):
+        # Only used to read metadata on a bare runner: the architecture in a
+        # built file name comes from the SDK of the world's own image.
         from vitasdk_autobuild import config
         with open(srcinfo.SRCINFO_CONF, encoding="utf-8") as handle:
             text = handle.read()
-        self.assertIn(f'CARCH="{config.ARCH}"', text)
+        self.assertIn(f'CARCH="{config.default_world().arch}"', text)
         # Source protocols are validated even when nothing is downloaded, so
         # dropping these lists breaks every recipe using git sources.
         self.assertIn("VCSCLIENTS=", text)

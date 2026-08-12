@@ -5,54 +5,66 @@ from vitasdk_autobuild import commands, config, main, queue, report, repository
 from vitasdk_autobuild.queue import PackageStatus
 
 from .test_build import make_asset
-from .test_queue import make_package, queue_of
+
+
+def apply_status(packages, done, failed, urls=None):
+    queue.apply_status(packages, done, failed, urls, [WORLD])
+from .test_queue import WORLD, make_package, queue_of
 
 
 class TestPickPackage(unittest.TestCase):
 
     def setUp(self):
         self.packages = [make_package(name) for name in ("a", "b", "c", "d", "e")]
-        queue.apply_status(self.packages, [], [])
+        apply_status(self.packages, [], [])
 
     def test_start_takes_the_first(self):
-        self.assertEqual(commands.pick_package(self.packages, "start", set()).name, "a")
+        self.assertEqual(commands.pick_package(self.packages, WORLD, "start", set()).name, "a")
 
     def test_end_takes_the_last(self):
-        self.assertEqual(commands.pick_package(self.packages, "end", set()).name, "e")
+        self.assertEqual(commands.pick_package(self.packages, WORLD, "end", set()).name, "e")
 
     def test_middle_takes_the_middle(self):
-        self.assertEqual(commands.pick_package(self.packages, "middle", set()).name, "c")
+        self.assertEqual(commands.pick_package(self.packages, WORLD, "middle", set()).name, "c")
 
     def test_skips_what_this_worker_already_tried(self):
         skip = {("a", "1.0-1")}
-        self.assertEqual(commands.pick_package(self.packages, "start", skip).name, "b")
+        self.assertEqual(commands.pick_package(self.packages, WORLD, "start", skip).name, "b")
 
     def test_returns_nothing_when_the_queue_is_empty(self):
         for package in self.packages:
-            package.set_status(PackageStatus.FINISHED)
-        self.assertIsNone(commands.pick_package(self.packages, "start", set()))
+            package.set_status(WORLD, PackageStatus.FINISHED)
+        self.assertIsNone(commands.pick_package(self.packages, WORLD, "start", set()))
 
     def test_only_picks_packages_that_are_ready(self):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, [], [])
+        apply_status(packages, [], [])
         for _ in range(3):
-            self.assertEqual(commands.pick_package(packages, "end", set()).name, "zlib")
+            self.assertEqual(commands.pick_package(packages, WORLD, "end", set()).name, "zlib")
 
 
 class TestImageTag(unittest.TestCase):
 
-    def test_tag_is_derived_from_the_core_snapshot(self):
-        self.assertEqual(commands.image_tag(), config.CORE_SNAPSHOT)
+    def test_tag_is_derived_from_the_world_core(self):
+        self.assertEqual(commands.image_tag(WORLD), WORLD.core)
 
     def test_tag_is_safe_for_docker(self):
-        original = config.CORE_SNAPSHOT
-        config.CORE_SNAPSHOT = "refs/heads/weird tag"
+        world = config.World(arch="x", core="refs/heads/weird tag", repository="x")
+        self.assertEqual(commands.image_tag(world), "refs-heads-weird-tag")
+
+    def test_every_world_gets_its_own_image(self):
+        # A world is chosen by the image a worker runs in, so two worlds must
+        # never share one.
+        other = config.World(arch="vita-musl", core="musl-core", repository="vita-musl")
+        original = config.WORLDS
+        config.WORLDS = [WORLD, other]
         try:
-            self.assertEqual(commands.image_tag(), "refs-heads-weird-tag")
+            tags = commands.image_tags()
         finally:
-            config.CORE_SNAPSHOT = original
+            config.WORLDS = original
+        self.assertEqual(len(set(tags.values())), 2)
 
 
 class TestStatusFile(unittest.TestCase):
@@ -61,31 +73,32 @@ class TestStatusFile(unittest.TestCase):
         zlib = make_package("zlib", "1.3.2-2")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, ["zlib-1.3.2-2-vita.pkg.tar.xz"], [])
+        apply_status(packages, ["zlib-1.3.2-2-vita.pkg.tar.xz"], [])
 
-        status = report.build_status(packages, [], "sdk-snapshot-1", "abc123")
-        self.assertEqual(status["core_snapshot"], "sdk-snapshot-1")
+        status = report.build_status(packages, [], "abc123", [WORLD])
+        self.assertEqual(status["worlds"][0]["core"], WORLD.core)
         self.assertEqual(status["packages_revision"], "abc123")
         entry = {p["name"]: p for p in status["packages"]}
-        self.assertEqual(entry["zlib"]["status"], "finished")
+        self.assertEqual(entry["zlib"]["builds"][WORLD.arch]["status"], "finished")
         self.assertEqual(entry["zlib"]["rdepends"], ["libpng"])
         self.assertEqual(entry["libpng"]["depends"], ["zlib"])
-        self.assertEqual(entry["libpng"]["status"], "waiting-for-build")
+        self.assertEqual(entry["libpng"]["builds"][WORLD.arch]["status"], "waiting-for-build")
 
     def test_status_is_json_serialisable(self):
         packages = queue_of(make_package("zlib"))
-        queue.apply_status(packages, [], [])
-        status = report.build_status(packages, [], "core", "rev")
+        apply_status(packages, [], [])
+        status = report.build_status(packages, [], "rev", [WORLD])
         self.assertIn("zlib", json.dumps(status))
 
     def test_internal_blocking_details_are_not_published(self):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, [], [])
-        status = report.build_status(packages, [], "core", "rev")
+        apply_status(packages, [], [])
+        status = report.build_status(packages, [], "rev", [WORLD])
         for entry in status["packages"]:
-            self.assertNotIn("blocked", entry["details"])
+            for build in entry["builds"].values():
+                self.assertNotIn("blocked", build["details"])
 
     def test_running_jobs_are_filtered_and_sorted(self):
         jobs = report.running_jobs([
@@ -102,24 +115,24 @@ class TestRepositorySelection(unittest.TestCase):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, ["libpng-1.0-1-vita.pkg.tar.xz"], [])
-        self.assertEqual(png.status, PackageStatus.FINISHED_BUT_BLOCKED)
-        self.assertEqual(repository.selectable(packages, include_blocked=False), [])
+        apply_status(packages, ["libpng-1.0-1-vita.pkg.tar.xz"], [])
+        self.assertEqual(png.get_status(WORLD), PackageStatus.FINISHED_BUT_BLOCKED)
+        self.assertEqual(repository.selectable(packages, WORLD, include_blocked=False), [])
 
     def test_staging_takes_blocked_packages_too(self):
         zlib = make_package("zlib")
         png = make_package("libpng", depends=["zlib"])
         packages = queue_of(zlib, png)
-        queue.apply_status(packages, ["libpng-1.0-1-vita.pkg.tar.xz"], [])
-        self.assertEqual(repository.selectable(packages, include_blocked=True), [png])
+        apply_status(packages, ["libpng-1.0-1-vita.pkg.tar.xz"], [])
+        self.assertEqual(repository.selectable(packages, WORLD, include_blocked=True), [png])
 
     def test_selects_the_matching_files(self):
         zlib = make_package("zlib", "1.3.2-2")
-        queue.apply_status([zlib], ["zlib-1.3.2-2-vita.pkg.tar.xz"], [])
+        apply_status([zlib], ["zlib-1.3.2-2-vita.pkg.tar.xz"], [])
         assets = [make_asset("zlib-1.3.2-2-vita.pkg.tar.xz"),
                   make_asset("zlib-1.3.2-1-vita.pkg.tar.xz"),
                   make_asset("core-snapshot.txt")]
-        selected = repository.select_assets([zlib], assets)
+        selected = repository.select_assets([zlib], WORLD, assets)
         self.assertEqual([a.filename for a in selected], ["zlib-1.3.2-2-vita.pkg.tar.xz"])
 
 
@@ -131,17 +144,18 @@ class TestProvenance(unittest.TestCase):
             path = repository.write_provenance(directory, "packages-sha", "buildscripts-sha")
             with open(path, encoding="utf-8") as handle:
                 data = json.load(handle)
-        self.assertEqual(data["core_snapshot"], config.CORE_SNAPSHOT)
+        self.assertEqual(data["core_snapshot"], WORLD.core)
+        self.assertEqual(data["worlds"][0]["arch"], WORLD.arch)
         self.assertEqual(data["packages_revision"], "packages-sha")
         self.assertEqual(data["buildscripts_revision"], "buildscripts-sha")
-        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["schema_version"], 2)
 
 
 class TestConfigOverrides(unittest.TestCase):
 
     def test_string_override(self):
-        key, value = main.parse_override("CORE_SNAPSHOT=sdk-snapshot-9")
-        self.assertEqual((key, value), ("CORE_SNAPSHOT", "sdk-snapshot-9"))
+        key, value = main.parse_override("PACKAGES_BRANCH=next")
+        self.assertEqual((key, value), ("PACKAGES_BRANCH", "next"))
 
     def test_integer_override(self):
         self.assertEqual(main.parse_override("MAXIMUM_JOB_COUNT=3"), ("MAXIMUM_JOB_COUNT", 3))
@@ -170,7 +184,8 @@ class TestCommandLine(unittest.TestCase):
 
     def test_every_command_is_reachable(self):
         parser = main.build_parser()
-        for command in ("show", "build", "update-status", "clean-assets", "clear-failed"):
+        for command in ("show", "build", "update-status", "clean-assets", "clear-failed",
+                        "image-tag", "update-recipes"):
             self.assertTrue(callable(parser.parse_args([command]).func))
 
     def test_supervise_requires_a_branch(self):
@@ -230,9 +245,9 @@ class TestMachineReadableOutput(unittest.TestCase):
         self.assertEqual(out.getvalue(), "")
         self.assertIn("true", err.getvalue())
 
-    def test_image_tag_prints_one_line_only(self):
-        # It is read into a shell variable and written to $GITHUB_OUTPUT, where
-        # a second line without an '=' fails the whole job.
+    def test_image_tag_prints_one_line_per_world(self):
+        # Each line is read into a shell variable and written to
+        # $GITHUB_OUTPUT, where a malformed line fails the whole job.
         import contextlib
         import io
         import os
@@ -249,8 +264,10 @@ class TestMachineReadableOutput(unittest.TestCase):
                     commands.cmd_image_tag(None)
 
         lines = out.getvalue().strip().splitlines()
-        self.assertEqual(len(lines), 1)
-        self.assertTrue(lines[0].startswith(config.CORE_SNAPSHOT))
+        self.assertEqual(len(lines), len(config.worlds()))
+        arch, tag = lines[0].split()
+        self.assertEqual(arch, WORLD.arch)
+        self.assertTrue(tag.startswith(WORLD.core))
 
 class TestRepositoryGeneration(unittest.TestCase):
 
@@ -264,7 +281,8 @@ class TestRepositoryGeneration(unittest.TestCase):
         with mock.patch.object(repository, "run") as run:
             with mock.patch("os.path.exists", return_value=False):
                 with mock.patch("os.makedirs"):
-                    repository.create_database("/pkgs", "/in", "/tmp/out/repository", "1")
+                    repository.create_database("/pkgs", "/in", "/tmp/out/repository",
+                                               "1", "vita")
         arguments = run.call_args[0][0]
         self.assertIn("--user", arguments)
         self.assertEqual(arguments[arguments.index("--user") + 1],
@@ -277,9 +295,10 @@ class TestRepositoryGeneration(unittest.TestCase):
         with mock.patch.object(repository, "run") as run:
             with mock.patch("os.path.exists", return_value=False):
                 with mock.patch("os.makedirs"):
-                    repository.create_database("/pkgs", "/in", "/tmp/out/repository", "1")
+                    repository.create_database("/pkgs", "/in", "/tmp/out/repository",
+                                               "1", "vita")
         arguments = run.call_args[0][0]
-        self.assertIn(f"REPOSITORY_NAME={config.REPOSITORY_NAME}", arguments)
+        self.assertIn("REPOSITORY_NAME=vita", arguments)
 
 
 if __name__ == "__main__":

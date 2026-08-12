@@ -14,6 +14,7 @@ import tempfile
 from typing import Iterable
 
 from . import config, gh, queue
+from .config import World
 from .gh import Asset
 from .queue import Package
 from .utils import as_build_user, clean_environ, give_to_build_user, group
@@ -32,14 +33,19 @@ def get_packager() -> str:
     return f"CI ({reference})"
 
 
-def select_dependency_assets(package: Package, assets: Iterable[Asset]) -> list[Asset]:
-    """The exact package files a build needs, dependencies first."""
+def select_dependency_assets(package: Package, world: World,
+                             assets: Iterable[Asset]) -> list[Asset]:
+    """The exact package files a build needs, dependencies first.
+
+    Only files of the same world: a package never links against another
+    world's build of the same library.
+    """
 
     by_name = {asset.filename: asset for asset in assets}
     selected: list[Asset] = []
     missing: list[str] = []
-    for dependency in queue.install_order(package):
-        for pattern in dependency.build_patterns():
+    for dependency in queue.install_order(package, world):
+        for pattern in dependency.build_patterns(world):
             matches = sorted(fnmatch.filter(by_name, pattern))
             if matches:
                 selected.append(by_name[matches[0]])
@@ -55,12 +61,13 @@ def select_dependency_assets(package: Package, assets: Iterable[Asset]) -> list[
     return selected
 
 
-def expected_outputs(package: Package, produced: Iterable[str]) -> list[str]:
+def expected_outputs(package: Package, world: World,
+                     produced: Iterable[str]) -> list[str]:
     """Checks that the build produced exactly the versions the queue expects."""
 
     names = list(produced)
     found = []
-    for pattern in package.build_patterns():
+    for pattern in package.build_patterns(world):
         matches = fnmatch.filter(names, pattern)
         if not matches:
             raise BuildError(
@@ -169,8 +176,27 @@ def install_dependencies(assets: list[Asset], sdk: str) -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
-def run_build(package: Package, packages_dir: str, output_dir: str,
-              source_date_epoch: str) -> list[str]:
+def world_environment(world: World, sdk: str, environ: dict[str, str]) -> dict[str, str]:
+    """Points the build at one world.
+
+    A world is chosen by the image the worker runs in: each carries a complete
+    SDK for one EABI, so the SDK's own makepkg configuration already targets
+    it and nothing has to be forced here. The optional per-world configuration
+    exists only for an SDK that ever ships more than one.
+
+    Nothing verifies the image here, and nothing needs to: a build that
+    produced another architecture would not match the expected file name and
+    fails instead of uploading something mislabelled.
+    """
+
+    configuration = os.path.join(sdk, "etc", f"makepkg-{world.arch}.conf")
+    if os.path.exists(configuration):
+        environ["MAKEPKG_CONF"] = configuration
+    return environ
+
+
+def run_build(package: Package, world: World, packages_dir: str, output_dir: str,
+              source_date_epoch: str, sdk: str) -> list[str]:
     """Runs the recipe repository's build script and returns what it produced."""
 
     script = os.path.join(packages_dir, "build.sh")
@@ -181,12 +207,13 @@ def run_build(package: Package, packages_dir: str, output_dir: str,
     environ = clean_environ(dict(os.environ))
     environ["SOURCE_DATE_EPOCH"] = source_date_epoch
     environ["PACKAGER"] = get_packager()
+    world_environment(world, sdk, environ)
 
     for path in (output_dir, os.path.join(packages_dir, package.repo_path)):
         give_to_build_user(path)
     command = as_build_user(
         ["bash", script, package.repo_path, output_dir], environ,
-        ["SOURCE_DATE_EPOCH", "PACKAGER", "VITASDK", "PATH", "HOME"])
+        ["SOURCE_DATE_EPOCH", "PACKAGER", "VITASDK", "PATH", "HOME", "MAKEPKG_CONF"])
 
     print("$ " + shlex.join(command), flush=True)
     result = subprocess.run(command, cwd=packages_dir, env=environ)
@@ -196,16 +223,17 @@ def run_build(package: Package, packages_dir: str, output_dir: str,
     return sorted(name for name in os.listdir(output_dir) if ".pkg.tar." in name)
 
 
-def build_package(package: Package, packages_dir: str, sdk: str,
+def build_package(package: Package, world: World, packages_dir: str, sdk: str,
                   source_date_epoch: str, staging: gh.Release,
                   assets: list[Asset]) -> list[str]:
     """Installs dependencies, builds, and uploads. Returns uploaded names."""
 
     output_dir = tempfile.mkdtemp(prefix="vitasdk-out-")
     try:
-        install_dependencies(select_dependency_assets(package, assets), sdk)
-        produced = run_build(package, packages_dir, output_dir, source_date_epoch)
-        uploaded = expected_outputs(package, produced)
+        install_dependencies(select_dependency_assets(package, world, assets), sdk)
+        produced = run_build(package, world, packages_dir, output_dir,
+                             source_date_epoch, sdk)
+        uploaded = expected_outputs(package, world, produced)
         for name in uploaded:
             gh.upload_asset(staging, name, path=os.path.join(output_dir, name))
         return uploaded
@@ -213,20 +241,22 @@ def build_package(package: Package, packages_dir: str, sdk: str,
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
-def report_failure(package: Package, failed: gh.Release) -> None:
+def report_failure(package: Package, world: World, failed: gh.Release) -> None:
     """Records a failure so the queue stops retrying it every round."""
 
     content = json.dumps({"urls": gh.get_current_run_urls()}, indent=2).encode()
-    gh.upload_asset(failed, package.failed_name(), content=content, replace=True)
+    gh.upload_asset(failed, package.failed_name(world), content=content, replace=True)
 
 
-def build_one(package: Package, packages_dir: str, sdk: str, source_date_epoch: str,
-              staging: gh.Release, failed: gh.Release, assets: list[Asset]) -> bool:
-    with group(f"{package.name} {package.version}"):
+def build_one(package: Package, world: World, packages_dir: str, sdk: str,
+              source_date_epoch: str, staging: gh.Release, failed: gh.Release,
+              assets: list[Asset]) -> bool:
+    with group(f"[{world.arch}] {package.name} {package.version}"):
         try:
-            build_package(package, packages_dir, sdk, source_date_epoch, staging, assets)
+            build_package(package, world, packages_dir, sdk, source_date_epoch,
+                          staging, assets)
         except (BuildError, subprocess.CalledProcessError) as e:
             print(f"FAILED: {e}", flush=True)
-            report_failure(package, failed)
+            report_failure(package, world, failed)
             return False
     return True
