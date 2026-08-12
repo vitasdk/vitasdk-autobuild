@@ -111,6 +111,37 @@ class TestPermissions(unittest.TestCase):
 
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestReusableWorkflowCalls(unittest.TestCase):
+    """A calling job must hand over every permission the called one asks for.
+
+    With `permissions: {}` at the top of a file, a job that calls a reusable
+    workflow grants nothing, and the whole run then fails to start rather than
+    failing a step, which is hard to read from the outside.
+    """
+
+    def called_workflows(self):
+        for path in workflow_files():
+            document = load(path)
+            for job_name, job in document["jobs"].items():
+                uses = str(job.get("uses", ""))
+                if uses.startswith("./.github/workflows/"):
+                    yield path, job_name, job, os.path.join(
+                        WORKFLOW_DIR, os.path.basename(uses))
+
+    def test_there_is_at_least_one_call(self):
+        self.assertTrue(list(self.called_workflows()))
+
+    def test_callers_grant_what_the_called_workflow_needs(self):
+        for path, job_name, job, called_path in self.called_workflows():
+            granted = job.get("permissions") or {}
+            for called_job, called in load(called_path)["jobs"].items():
+                for scope, level in (called.get("permissions") or {}).items():
+                    with self.subTest(caller=os.path.basename(path), job=job_name,
+                                      called=called_job, scope=scope):
+                        self.assertEqual(granted.get(scope), level)
+
+
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestWorkerWorkflow(unittest.TestCase):
 
     def setUp(self):

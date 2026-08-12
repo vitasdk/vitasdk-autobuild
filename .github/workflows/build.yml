@@ -25,6 +25,12 @@ concurrency:
 jobs:
   image:
     uses: ./.github/workflows/image.yml
+    # A called workflow cannot be granted more than the calling job holds, and
+    # the top of this file grants nothing, so the permissions it needs to push
+    # the image have to be handed over here.
+    permissions:
+      contents: read
+      packages: write
 
   supervise:
     needs: image
