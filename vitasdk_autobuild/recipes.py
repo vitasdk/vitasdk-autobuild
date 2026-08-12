@@ -88,20 +88,25 @@ def source_ref(source: Source) -> str:
     return "HEAD"
 
 
-def resolve(url: str, cache_dir: str, ref: str = "HEAD") -> tuple[str, int]:
-    """Current commit of a git ref and how many commits lead to it."""
+def _mirror(url: str, cache_dir: str) -> str:
+    """A local mirror of a repository, holding commits but no file contents."""
 
     os.makedirs(cache_dir, exist_ok=True)
     name = re.sub(r"[^A-Za-z0-9._-]", "_", url)
     path = os.path.join(cache_dir, name + ".git")
     if not os.path.exists(path):
-        # Commits only: enough to count and identify, without file contents.
         subprocess.run(["git", "clone", "--quiet", "--bare", "--filter=blob:none", url, path],
                        check=True)
     else:
         subprocess.run(["git", "-C", path, "fetch", "--quiet", "--force", "--prune",
                         "origin", "+refs/heads/*:refs/heads/*"], check=True)
+    return path
 
+
+def resolve(url: str, cache_dir: str, ref: str = "HEAD") -> tuple[str, int]:
+    """Current commit of a git ref and how many commits lead to it."""
+
+    path = _mirror(url, cache_dir)
     target = "HEAD" if ref == "HEAD" else f"refs/heads/{ref}"
     resolved = subprocess.run(["git", "-C", path, "rev-parse", "--verify", "--quiet", target],
                               capture_output=True, text=True)
@@ -111,6 +116,17 @@ def resolve(url: str, cache_dir: str, ref: str = "HEAD") -> tuple[str, int]:
     count = subprocess.run(["git", "-C", path, "rev-list", "--count", sha],
                            check=True, capture_output=True, text=True).stdout.strip()
     return sha, int(count)
+
+
+def count_commits(url: str, cache_dir: str, sha: str) -> tuple[str, int]:
+    """How many commits lead to a commit a recipe is already pinned to."""
+
+    path = _mirror(url, cache_dir)
+    resolved = subprocess.run(["git", "-C", path, "rev-list", "--count", sha],
+                              capture_output=True, text=True)
+    if resolved.returncode != 0:
+        raise ValueError(f"{url}: commit {sha[:8]} is not in the repository")
+    return sha, int(resolved.stdout.strip())
 
 
 def rewrite(text: str, pkgver: str, pins: dict[str, str]) -> str:
@@ -147,18 +163,28 @@ def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
 
     name = info["pkgbase"]
     pkgver = info["pkgver"]
-    unpinned = [s for s in find_sources(text) if not s.pinned and s.protocol == "git"]
-    if not unpinned:
+    git_sources = [s for s in find_sources(text) if s.protocol == "git"]
+    unpinned = [s for s in git_sources if not s.pinned]
+
+    # A pinned recipe still claiming a live version is not building something
+    # different every day, but 9999 sits above every real release for ever, so
+    # the version has to come down even though the commit stays put.
+    if not unpinned and not (git_sources and pkgver in LIVE_VERSIONS):
         return None
 
     pins: dict[str, str] = {}
     newest: tuple[int, str] = (0, "")
-    for source in unpinned:
+    for source in git_sources:
         url = expand(source.url, name, pkgver)
         if "$" in url:
             raise ValueError(f"{name}: cannot resolve source URL {source.url!r}")
-        sha, count = resolve(url, cache_dir, source_ref(source))
-        pins[source.url] = sha
+        if source.pinned:
+            if not source.fragment.startswith("#commit="):
+                raise ValueError(f"{name}: pinned to a tag, set the version by hand")
+            sha, count = count_commits(url, cache_dir, source.fragment.split("=", 1)[1])
+        else:
+            sha, count = resolve(url, cache_dir, source_ref(source))
+            pins[source.url] = sha
         if count > newest[0]:
             newest = (count, sha)
 

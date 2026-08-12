@@ -186,6 +186,44 @@ class TestSourceRef(unittest.TestCase):
         source = recipes.find_sources('source=("git+https://x/y.git#commit=abc")')[0]
         self.assertTrue(source.pinned)
 
+PINNED_BUT_LIVE = """\
+pkgname=kubridge
+pkgver=9999
+pkgrel=1
+source=("git+https://github.com/bythos14/kubridge.git#commit=a4ef20fc3ab07b493f9d7d67703272831e445e21")
+sha256sums=('SKIP')
+"""
+
+
+class TestPinnedButLive(unittest.TestCase):
+    """A pinned recipe can still carry a version that sorts above everything."""
+
+    def test_a_pinned_recipe_with_a_live_version_is_not_left_alone(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "VITABUILD"), "w", encoding="utf-8") as handle:
+                handle.write(PINNED_BUT_LIVE)
+            info = {"pkgbase": "kubridge", "pkgver": "9999"}
+            with mock.patch.object(recipes, "count_commits", return_value=("a4ef20f" + "c" * 33, 91)):
+                update = recipes.plan_update(directory, info, directory)
+
+        self.assertIsNotNone(update)
+        self.assertEqual(update.new_version, "0.0.0.r91.ga4ef20f")
+        # The commit does not move: only the version comes down.
+        self.assertEqual(update.pins, {})
+
+    def test_a_pinned_recipe_with_a_real_version_is_left_alone(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "VITABUILD"), "w", encoding="utf-8") as handle:
+                handle.write(PINNED_BUT_LIVE.replace("pkgver=9999", "pkgver=1.0"))
+            info = {"pkgbase": "kubridge", "pkgver": "1.0"}
+            self.assertIsNone(recipes.plan_update(directory, info, directory))
+
 
 if __name__ == "__main__":
     unittest.main()
