@@ -216,6 +216,42 @@ class TestReadOnlyPaths(unittest.TestCase):
         with self.assertRaises(gh.GitHubError):
             state.assets_of(broken, create=False)
 
+class TestMachineReadableOutput(unittest.TestCase):
+    """Commands a workflow reads must print the answer and nothing else."""
+
+    def test_progress_goes_to_stderr(self):
+        import contextlib
+        import io
+        from vitasdk_autobuild.utils import run
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            run(["true"])
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("true", err.getvalue())
+
+    def test_image_tag_prints_one_line_only(self):
+        # It is read into a shell variable and written to $GITHUB_OUTPUT, where
+        # a second line without an '=' fails the whole job.
+        import contextlib
+        import io
+        import os
+        import tempfile
+        from unittest import mock
+        from vitasdk_autobuild import state
+
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "Dockerfile"), "w", encoding="utf-8") as handle:
+                handle.write("FROM ubuntu:24.04\n")
+            out = io.StringIO()
+            with mock.patch.object(state, "packages_checkout", return_value=directory):
+                with contextlib.redirect_stdout(out):
+                    commands.cmd_image_tag(None)
+
+        lines = out.getvalue().strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith(config.CORE_SNAPSHOT))
+
 
 if __name__ == "__main__":
     unittest.main()

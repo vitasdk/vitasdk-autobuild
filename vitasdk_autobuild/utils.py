@@ -61,10 +61,14 @@ def table(headers: Sequence[str], rows: Iterable[Sequence[object]]) -> str:
 
 
 def run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess:
-    """subprocess.run() that fails loudly and echoes what it runs."""
+    """subprocess.run() that fails loudly and echoes what it runs.
+
+    The echo goes to stderr: commands whose output a caller reads must leave
+    stdout carrying nothing but the answer.
+    """
 
     printable = " ".join(str(a) for a in args)
-    print(f"$ {printable}", flush=True)
+    print(f"$ {printable}", file=sys.stderr, flush=True)
     return subprocess.run([str(a) for a in args], check=True, **kwargs)  # type: ignore[arg-type]
 
 
