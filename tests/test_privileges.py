@@ -60,6 +60,30 @@ class TestAsBuildUser(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN=secret", command)
         self.assertTrue(all("secret" not in part for part in command))
 
+class TestGitOwnership(unittest.TestCase):
+    """Root reading a checkout that belongs to the build user."""
+
+    def test_nothing_is_configured_when_not_root(self):
+        with mock.patch("os.geteuid", return_value=1000):
+            with mock.patch("subprocess.run") as run:
+                utils.trust_git_checkouts()
+        run.assert_not_called()
+
+    def test_root_marks_checkouts_as_safe(self):
+        with mock.patch("os.geteuid", return_value=0):
+            with mock.patch("subprocess.run") as run:
+                utils.trust_git_checkouts()
+        arguments = run.call_args[0][0]
+        self.assertEqual(arguments[:3], ["git", "config", "--global"])
+        self.assertIn("safe.directory", arguments)
+
+    def test_it_replaces_rather_than_appends(self):
+        # Called once per worker start; appending would grow the config.
+        with mock.patch("os.geteuid", return_value=0):
+            with mock.patch("subprocess.run") as run:
+                utils.trust_git_checkouts()
+        self.assertIn("--replace-all", run.call_args[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

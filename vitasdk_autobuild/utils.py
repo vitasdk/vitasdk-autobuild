@@ -112,6 +112,20 @@ def give_to_build_user(path: str) -> None:
         subprocess.run(["chown", "-R", user, path], check=True)
 
 
+def trust_git_checkouts() -> None:
+    """Lets root use a checkout owned by the build user.
+
+    The recipes have to belong to the unprivileged user, because makepkg
+    writes next to them, while the queue is read by this process as root. git
+    refuses that combination by default, calling it dubious ownership.
+    """
+
+    if os.geteuid() != 0:
+        return
+    subprocess.run(["git", "config", "--global", "--replace-all",
+                    "safe.directory", "*"], check=True)
+
+
 def run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess:
     """subprocess.run() that fails loudly and echoes what it runs.
 

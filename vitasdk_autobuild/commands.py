@@ -13,7 +13,7 @@ from typing import Any
 from . import (build, build_plan, config, gh, queue, recipes, report, repository,
                srcinfo, state)
 from .queue import Package, PackageStatus
-from .utils import group, notice, sanitize_tag
+from .utils import group, notice, sanitize_tag, trust_git_checkouts
 
 WORKER_WORKFLOW = "build-jobs.yml"
 
@@ -111,6 +111,7 @@ def pick_package(packages: list[Package], build_from: str,
 
 
 def cmd_build(args: Any) -> None:
+    trust_git_checkouts()
     sdk = os.environ.get("VITASDK")
     if not sdk or not os.path.isdir(sdk):
         raise SystemExit("ERROR: VITASDK must point at an installed SDK")

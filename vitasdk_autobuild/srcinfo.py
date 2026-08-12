@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from . import config
-from .utils import as_build_user, give_to_build_user, run
+from .utils import as_build_user, run
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 SRCINFO_CONF = os.path.join(DATA_DIR, "srcinfo.conf")
@@ -32,7 +32,6 @@ def cache_dir() -> str:
         os.path.expanduser("~"), ".cache", "vitasdk-autobuild")
     path = os.path.join(root, "srcinfo")
     os.makedirs(path, exist_ok=True)
-    give_to_build_user(path)
     return path
 
 
