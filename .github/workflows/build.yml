@@ -74,6 +74,7 @@ jobs:
       - name: Plan, dispatch and follow the build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL_TOKEN: ${{ secrets.CHANNEL_TOKEN }}
           WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
         shell: bash

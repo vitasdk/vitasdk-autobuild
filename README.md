@@ -140,13 +140,37 @@ SigLevel = Never
 Server = https://github.com/vitasdk/vitasdk-autobuild/releases/download/staging
 ```
 
+## What happens after a snapshot
+
+A snapshot is a repository, not something a client is pointed at yet. What
+points clients at it is a signed channel manifest, and the signing key lives
+in `vitasdk/autobuilds` and nowhere else. So cutting a snapshot ends by asking
+that repository for a manifest naming it:
+
+```
+core-update / build / snapshot        →  packages-snapshot-*   (here, immutable)
+                                      →  ask autobuilds for a manifest
+                                      →  channels/nightly.json (signed, on Pages)
+```
+
+The request carries the snapshot tag, the core it was built against, and this
+repository's name, so the manifest records where the packages actually live
+rather than assuming it. If the token is missing or the request fails, the
+snapshot is published all the same and the manifest can be produced by hand
+afterwards; nothing is rebuilt.
+
 ## Setting it up
 
 1. A branch named `build-branch` tracking `main`. The supervisor dispatches
    workers onto it so a push to `main` cannot change a build already running.
 2. `RECIPES_TOKEN`, only for `update-recipes.yml`, which opens a pull request
-   against the recipe repository. Everything else uses `GITHUB_TOKEN`.
-3. Nothing else. There is no service to host and no key to rotate.
+   against the recipe repository.
+3. Two tokens for talking to other repositories, because a job's own
+   `GITHUB_TOKEN` cannot reach outside this one: `WEBSITE_TOKEN` to tell the
+   website there is new status, and `CHANNEL_TOKEN` to ask for a channel
+   manifest. Both are optional by design — without them the builds and the
+   snapshots are unaffected, only the notifications are.
+4. Nothing else. There is no service to host, and no signing key here.
 
 ## Tests
 

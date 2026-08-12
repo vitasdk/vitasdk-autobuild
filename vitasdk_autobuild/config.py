@@ -105,6 +105,12 @@ LEGACY_CORE_MARKER = "core-snapshot.txt"
 WEBSITE_REPO = "vitasdk/vitasdk-web"
 WEBSITE_EVENT = "status_updated"
 
+# Where a signed channel manifest is produced. The signing key lives there and
+# nowhere else, so a published snapshot asks for a manifest rather than making
+# one. Needs a token with write access to that repository.
+CHANNEL_REPO = "vitasdk/autobuilds"
+CHANNEL_EVENT = "update_channel"
+
 # Prefix of the immutable snapshot releases cut from the staging area.
 SNAPSHOT_PREFIX = "packages-snapshot-"
 

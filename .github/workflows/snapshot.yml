@@ -34,6 +34,7 @@ jobs:
       - name: Build and publish the repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL_TOKEN: ${{ secrets.CHANNEL_TOKEN }}
           INCLUDE_BLOCKED: ${{ inputs.include_blocked }}
           BUILDSCRIPTS_REVISION: ${{ inputs.buildscripts_revision }}
         shell: bash

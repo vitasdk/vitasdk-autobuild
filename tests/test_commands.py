@@ -332,6 +332,42 @@ class TestWebsiteNotification(unittest.TestCase):
                                    side_effect=gh.GitHubError(404, "Not Found")):
                 commands.notify_website()  # must not raise
 
+class TestChannelRequest(unittest.TestCase):
+    """A published snapshot asks for a manifest; it never signs one."""
+
+    def test_without_a_token_the_snapshot_is_still_published(self):
+        import os
+        from unittest import mock
+        environ = {k: v for k, v in os.environ.items() if k != "CHANNEL_TOKEN"}
+        with mock.patch.dict(os.environ, environ, clear=True):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.request_channel_manifest("packages-snapshot-1")
+        dispatch.assert_not_called()
+
+    def test_the_request_names_the_snapshot_and_where_it_lives(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret",
+                                          "GITHUB_REPOSITORY": "vitasdk/vitasdk-autobuild"}):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.request_channel_manifest("packages-snapshot-1")
+        repo, event, token = dispatch.call_args[0][:3]
+        payload = dispatch.call_args[0][3]
+        self.assertEqual(repo, config.CHANNEL_REPO)
+        self.assertEqual(event, config.CHANNEL_EVENT)
+        self.assertEqual(payload["packages_snapshot"], "packages-snapshot-1")
+        self.assertEqual(payload["packages_repository"], "vitasdk/vitasdk-autobuild")
+        self.assertEqual(payload["core_snapshot"], config.default_world().core)
+
+    def test_a_failed_request_does_not_undo_a_published_snapshot(self):
+        import os
+        from unittest import mock
+        from vitasdk_autobuild import gh
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository",
+                                   side_effect=gh.GitHubError(404, "Not Found")):
+                commands.request_channel_manifest("packages-snapshot-1")
+
 
 if __name__ == "__main__":
     unittest.main()
