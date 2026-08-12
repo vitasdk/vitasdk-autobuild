@@ -71,9 +71,16 @@ def expected_outputs(package: Package, produced: Iterable[str]) -> list[str]:
 
 
 def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Runs the SDK's own pacman against the SDK prefix."""
+    """Runs the SDK's own pacman against the SDK prefix.
 
-    return subprocess.run([
+    As the build user, not as root: the prefix belongs to that user and the
+    package client is rootless by design. Running it as root would leave
+    root-owned directories inside the prefix, and a recipe that installs into
+    the SDK rather than into $pkgdir would then fail on a permission its
+    predecessor did not need.
+    """
+
+    command = as_build_user([
         os.path.join(sdk, "bin", "pacman"),
         "--config", os.path.join(sdk, "etc", "pacman.conf"),
         "--root", sdk,
@@ -81,7 +88,8 @@ def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.Complete
         "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
         "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
         "--noscriptlet", "--noconfirm", "--noprogressbar", *arguments,
-    ], check=check, capture_output=True, text=True)
+    ], os.environ, ["PATH", "HOME", "VITASDK"])
+    return subprocess.run(command, check=check, capture_output=True, text=True)
 
 
 def installed_dependencies(sdk: str) -> list[str]:
@@ -128,6 +136,9 @@ def install_dependencies(assets: list[Asset], sdk: str) -> None:
             print(f"Fetching {asset.filename}", flush=True)
             gh.download_asset(asset, path)
             paths.append(path)
+        # Downloaded as root into a private directory, but read by pacman as
+        # the build user.
+        give_to_build_user(directory)
 
         pacman(sdk, "--upgrade", "--asdeps", "--needed", *paths)
     finally:

@@ -70,6 +70,27 @@ class TestUploadRace(unittest.TestCase):
                     gh._request("POST", "https://x")
         self.assertIn("already_exists", caught.exception.message)
 
+class TestRootlessPacman(unittest.TestCase):
+    """The prefix belongs to the build user, so the client runs as it."""
+
+    def test_pacman_is_dropped_to_the_build_user(self):
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: ["sudo", *c]) as drop:
+            with mock.patch("subprocess.run") as run:
+                build.pacman("/opt/vitasdk", "--query")
+        self.assertTrue(run.call_args[0][0][0] == "sudo")
+        passed = drop.call_args[0][2]
+        self.assertIn("VITASDK", passed)
+
+    def test_every_path_stays_inside_the_prefix(self):
+        # The self contained prefix contract: nothing is written outside it.
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
+            with mock.patch("subprocess.run") as run:
+                build.pacman("/opt/vitasdk", "--query")
+        arguments = run.call_args[0][0]
+        for flag in ("--root", "--dbpath", "--cachedir", "--logfile", "--config"):
+            value = arguments[arguments.index(flag) + 1]
+            self.assertTrue(value.startswith("/opt/vitasdk"), f"{flag} -> {value}")
+
 
 if __name__ == "__main__":
     unittest.main()
