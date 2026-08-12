@@ -198,6 +198,42 @@ class TestSupervisorWorkflow(unittest.TestCase):
         self.assertNotIn("schedule", triggers(self.document))
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestRecipeUpdateWorkflow(unittest.TestCase):
+    """Editing someone else's recipes has to be inspectable before it happens."""
+
+    def setUp(self):
+        self.document = load(os.path.join(WORKFLOW_DIR, "update-recipes.yml"))
+        self.steps = self.document["jobs"]["update"]["steps"]
+
+    def step(self, fragment):
+        for step in self.steps:
+            if fragment in step.get("name", ""):
+                return step
+        self.fail(f"no step named like {fragment!r}")
+
+    def test_a_dry_run_can_be_asked_for(self):
+        inputs = triggers(self.document)["workflow_dispatch"]["inputs"]
+        self.assertEqual(inputs["dry_run"]["type"], "boolean")
+        self.assertIs(inputs["dry_run"]["default"], False)
+
+    def test_a_dry_run_neither_edits_nor_opens_a_pull_request(self):
+        pin = self.step("Pin the recipes")
+        self.assertIn("if [[ $DRY_RUN != 'true' ]]; then", pin["run"])
+        self.assertIn("arguments+=(--write)", pin["run"])
+        self.assertIn("dry_run", self.step("pull request")["if"])
+
+    def test_it_never_pushes_to_the_recipes_directly(self):
+        # Noticing that upstream moved is this job's business; taking it is
+        # the maintainer's, so the only way out is a pull request.
+        body = self.step("pull request")["run"]
+        self.assertIn("gh pr create", body)
+        self.assertNotIn("packages.git\" master", body)
+
+    def test_the_job_cannot_write_to_its_own_repository(self):
+        self.assertEqual(self.document["jobs"]["update"]["permissions"]["contents"], "read")
+
+
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestMaintenanceWorkflow(unittest.TestCase):
     """Unsticking a package must not require a local token."""
 
