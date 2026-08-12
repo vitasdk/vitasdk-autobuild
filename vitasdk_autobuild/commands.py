@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -392,8 +393,15 @@ def cmd_bump_core(args: Any) -> None:
 
     # Read it back the way every command will: a configuration that no longer
     # imports would be found by the next run instead of by this one.
+    #
+    # The compiled cache has to go first. Python validates it by modification
+    # time and size, and two snapshot tags are usually the same length, so a
+    # rewrite within the same second is indistinguishable from no rewrite at
+    # all and the child would read the previous value back.
+    cache = os.path.join(os.path.dirname(path), "__pycache__")
+    shutil.rmtree(cache, ignore_errors=True)
     result = subprocess.run(
-        ["python3", "-c",
+        ["python3", "-B", "-c",
          "from vitasdk_autobuild import config; "
          f"print(config.world_by_arch({world.arch!r}).core)"],
         capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(path)))
