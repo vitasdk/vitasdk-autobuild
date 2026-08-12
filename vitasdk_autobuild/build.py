@@ -77,10 +77,14 @@ def expected_outputs(package: Package, world: World,
     return found
 
 
-# Options pacman only accepts on a transaction. Passing --noscriptlet to a
-# query makes it exit with "invalid option", which is the same defect
+# Operations that change the installed set. pacman rejects transaction
+# options on a query with "invalid option", which is the same defect
 # vita-makepkg already had to fix in run_pacman.
 TRANSACTIONS = ("--upgrade", "--remove", "--sync", "-U", "-R", "-S")
+
+# Options only a transaction accepts. Not just --noscriptlet: --noconfirm and
+# --noprogressbar are refused by a query too.
+TRANSACTION_OPTIONS = ("--noscriptlet", "--noconfirm", "--noprogressbar")
 
 
 def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -100,8 +104,8 @@ def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.Complete
         "--dbpath", os.path.join(sdk, "var", "lib", "pacman"),
         "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
         "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
-        *(["--noscriptlet"] if any(a in TRANSACTIONS for a in arguments) else []),
-        "--noconfirm", "--noprogressbar", *arguments,
+        *(TRANSACTION_OPTIONS if any(a in TRANSACTIONS for a in arguments) else ()),
+        *arguments,
     ], os.environ, ["PATH", "HOME", "VITASDK"])
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:

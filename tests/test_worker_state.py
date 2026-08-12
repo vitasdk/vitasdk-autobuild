@@ -161,14 +161,22 @@ class TestTransactionOnlyOptions(unittest.TestCase):
                 build.pacman("/opt/vitasdk", *arguments)
         return run.call_args[0][0]
 
-    def test_a_query_carries_no_transaction_options(self):
-        self.assertNotIn("--noscriptlet", self.arguments_for("--query", "--deps", "--quiet"))
+    def test_a_query_carries_no_transaction_option_at_all(self):
+        # Not only --noscriptlet: --noconfirm and --noprogressbar are refused
+        # by a query too, which the first version of this fix missed.
+        arguments = self.arguments_for("--query", "--deps", "--quiet")
+        for option in build.TRANSACTION_OPTIONS:
+            self.assertNotIn(option, arguments)
 
-    def test_an_install_does(self):
-        self.assertIn("--noscriptlet", self.arguments_for("--upgrade", "--asdeps", "x.pkg.tar.xz"))
+    def test_an_install_carries_all_of_them(self):
+        arguments = self.arguments_for("--upgrade", "--asdeps", "x.pkg.tar.xz")
+        for option in build.TRANSACTION_OPTIONS:
+            self.assertIn(option, arguments)
 
-    def test_a_removal_does(self):
-        self.assertIn("--noscriptlet", self.arguments_for("--remove", "--nodeps", "zlib"))
+    def test_a_removal_does_too(self):
+        arguments = self.arguments_for("--remove", "--nodeps", "zlib")
+        for option in build.TRANSACTION_OPTIONS:
+            self.assertIn(option, arguments)
 
 
 if __name__ == "__main__":
