@@ -186,6 +186,36 @@ class TestCommandLine(unittest.TestCase):
         self.assertFalse(args.staging)
         self.assertFalse(args.no_publish)
 
+class TestReadOnlyPaths(unittest.TestCase):
+    """A report and a dry run must leave the repository exactly as found."""
+
+    def test_a_missing_release_reads_as_empty(self):
+        from vitasdk_autobuild import gh, state
+
+        def missing(create):
+            self.assertFalse(create, "a read-only path must not ask for creation")
+            raise gh.GitHubError(404, "Not Found")
+
+        self.assertEqual(state.assets_of(missing, create=False), [])
+
+    def test_a_missing_release_is_still_an_error_when_writing(self):
+        from vitasdk_autobuild import gh, state
+
+        def missing(create):
+            raise gh.GitHubError(404, "Not Found")
+
+        with self.assertRaises(gh.GitHubError):
+            state.assets_of(missing, create=True)
+
+    def test_other_errors_are_never_swallowed(self):
+        from vitasdk_autobuild import gh, state
+
+        def broken(create):
+            raise gh.GitHubError(500, "Boom")
+
+        with self.assertRaises(gh.GitHubError):
+            state.assets_of(broken, create=False)
+
 
 if __name__ == "__main__":
     unittest.main()

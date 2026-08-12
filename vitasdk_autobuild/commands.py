@@ -54,7 +54,7 @@ def source_date_epoch(packages_dir: str) -> str:
 # ---------------------------------------------------------------- show
 
 def cmd_show(args: Any) -> None:
-    snapshot = state.get_queue_with_status(full_details=True)
+    snapshot = state.get_queue_with_status(full_details=True, create_releases=False)
     report.show_queue(snapshot.packages)
     notice(report.summary_line(snapshot.packages))
 
@@ -170,7 +170,8 @@ def cmd_supervise(args: Any) -> None:
     if state.enforce_core_pin(dry_run=args.dry_run):
         notice(f"Staging area reset for core {config.CORE_SNAPSHOT}")
 
-    snapshot = state.get_queue_with_status(full_details=True)
+    snapshot = state.get_queue_with_status(full_details=True,
+                                           create_releases=not args.dry_run)
     if drop_stale_dependents(snapshot, args.dry_run) and not args.dry_run:
         snapshot = state.get_queue_with_status(full_details=True)
 

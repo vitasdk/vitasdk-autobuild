@@ -47,16 +47,31 @@ def packages_revision(path: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def staging_release() -> gh.Release:
-    return gh.get_release(gh.get_current_repo(), config.STAGING_RELEASE)
+def staging_release(create: bool = True) -> gh.Release:
+    return gh.get_release(gh.get_current_repo(), config.STAGING_RELEASE, create=create)
 
 
-def failed_release() -> gh.Release:
-    return gh.get_release(gh.get_current_repo(), config.FAILED_RELEASE)
+def failed_release(create: bool = True) -> gh.Release:
+    return gh.get_release(gh.get_current_repo(), config.FAILED_RELEASE, create=create)
 
 
-def status_release() -> gh.Release:
-    return gh.get_release(gh.get_current_repo(), config.STATUS_RELEASE)
+def status_release(create: bool = True) -> gh.Release:
+    return gh.get_release(gh.get_current_repo(), config.STATUS_RELEASE, create=create)
+
+
+def assets_of(release_getter, create: bool) -> list[gh.Asset]:
+    """Assets of a release, treating a missing one as empty.
+
+    Reading must not have side effects: a command that only reports state has
+    no business creating the release it was going to read.
+    """
+
+    try:
+        return gh.get_assets(release_getter(create=create))
+    except gh.GitHubError as e:
+        if e.status == 404 and not create:
+            return []
+        raise
 
 
 @dataclass
@@ -75,14 +90,19 @@ class Snapshot:
         return {asset.filename: asset.created_at for asset in self.staging_assets}
 
 
-def get_queue_with_status(full_details: bool = False) -> Snapshot:
-    """The build queue, with every package's state resolved."""
+def get_queue_with_status(full_details: bool = False,
+                          create_releases: bool = True) -> Snapshot:
+    """The build queue, with every package's state resolved.
+
+    With create_releases off nothing is written at all, which is what lets a
+    dry run and a plain report leave the repository exactly as they found it.
+    """
 
     packages_dir = packages_checkout()
     packages = queue.build_queue(packages_dir)
 
-    staging_assets = gh.get_assets(staging_release())
-    failed_assets = gh.get_assets(failed_release())
+    staging_assets = assets_of(staging_release, create_releases)
+    failed_assets = assets_of(failed_release, create_releases)
     done_names = [a.filename for a in staging_assets]
     failed_names = [a.filename for a in failed_assets]
 
@@ -117,10 +137,10 @@ def get_queue_with_status(full_details: bool = False) -> Snapshot:
     )
 
 
-def get_core_marker() -> str:
+def get_core_marker(create: bool = True) -> str:
     """The core snapshot the staged packages were built against."""
 
-    for asset in gh.get_assets(staging_release()):
+    for asset in assets_of(staging_release, create):
         if asset.filename == config.CORE_MARKER_ASSET:
             return gh.download_asset_text(asset).strip()
     return ""
@@ -134,7 +154,7 @@ def enforce_core_pin(dry_run: bool = False) -> bool:
     was dropped.
     """
 
-    staged = get_core_marker()
+    staged = get_core_marker(create=not dry_run)
     if staged == config.CORE_SNAPSHOT:
         return False
 
