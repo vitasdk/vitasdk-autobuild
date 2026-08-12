@@ -184,6 +184,36 @@ def cmd_build(args: Any) -> None:
     notice(f"Worker finished after building {built} package(s)")
 
 
+def cmd_try_build(args: Any) -> None:
+    """Builds one package from a proposed recipe, changing nothing.
+
+    This is what makes a proposal decidable: a recipe change is only worth
+    merging if it still builds, and reading a diff does not tell you that.
+    """
+
+    trust_git_checkouts()
+    world = config.world_by_arch(args.world) if args.world else config.default_world()
+    sdk = os.environ.get("VITASDK")
+    if not sdk or not os.path.isdir(sdk):
+        raise SystemExit("ERROR: VITASDK must point at an installed SDK")
+
+    snapshot = state.get_queue_with_status(create_releases=False)
+    wanted = [p for p in snapshot.packages if p.name == args.package]
+    if not wanted:
+        raise SystemExit(f"ERROR: no recipe named {args.package}")
+    package = wanted[0]
+    if not package.builds_for(world):
+        raise SystemExit(f"ERROR: {package.name} does not build for {world.arch}")
+
+    print(f"Trying {package.name} {package.version} for {world.arch} "
+          f"against {world.core}", flush=True)
+    with group(f"[{world.arch}] {package.name} {package.version}"):
+        produced = build.try_build(package, world, snapshot.packages_dir, sdk,
+                                   source_date_epoch(snapshot.packages_dir),
+                                   snapshot.staging_assets)
+    notice(f"{package.name} {package.version} builds: " + ", ".join(produced))
+
+
 # ---------------------------------------------------------------- supervise
 
 def drop_stale_dependents(snapshot: state.Snapshot, dry_run: bool) -> int:

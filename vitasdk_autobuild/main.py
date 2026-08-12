@@ -91,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="which proposals to make (default: pin only)")
     update.set_defaults(func=commands.cmd_update_recipes)
 
+    try_build = subparsers.add_parser(
+        "try-build", help="build one package from a proposed recipe, uploading nothing")
+    try_build.add_argument("--package", required=True, help="which recipe to try")
+    try_build.add_argument("--world", default="", help="which world, by architecture")
+    try_build.set_defaults(func=commands.cmd_try_build)
+
     clean = subparsers.add_parser(
         "clean-assets", help="delete staged files no recipe asks for any more")
     clean.add_argument("--dry-run", action="store_true")

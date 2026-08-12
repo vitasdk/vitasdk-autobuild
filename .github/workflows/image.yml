@@ -10,7 +10,18 @@ name: image
 
 on:
   workflow_dispatch:
+    inputs:
+      packages_branch:
+        description: Recipe branch to read the Dockerfile from
+        type: string
+        default: ''
   workflow_call:
+    inputs:
+      packages_branch:
+        description: Recipe branch to read the Dockerfile from
+        type: string
+        required: false
+        default: ''
     outputs:
       tags:
         description: JSON mapping of world architecture to image tag
@@ -33,6 +44,7 @@ jobs:
       matrix: ${{ steps.identify.outputs.matrix }}
     env:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+      PACKAGES_BRANCH: ${{ inputs.packages_branch }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,6 +84,7 @@ jobs:
     name: ${{ matrix.arch }}
     env:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+      PACKAGES_BRANCH: ${{ inputs.packages_branch }}
     steps:
       - uses: actions/checkout@v6
         with:

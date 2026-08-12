@@ -66,7 +66,11 @@ def get_current_repo() -> str:
 
 
 def get_snapshot_repo() -> str:
-    return config.SNAPSHOT_REPO or get_current_repo()
+    return config.SNAPSHOT_REPO or get_autobuild_repo()
+
+
+def get_autobuild_repo() -> str:
+    return config.AUTOBUILD_REPO or get_current_repo()
 
 
 def _request(method: str, url: str, *, data: bytes | BinaryIO | None = None,

@@ -260,6 +260,34 @@ class TestRecipeUpdateWorkflow(unittest.TestCase):
 
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestTryBuildWorkflow(unittest.TestCase):
+    """A proposal is only decidable if something built it."""
+
+    def setUp(self):
+        self.document = load(os.path.join(WORKFLOW_DIR, "try-build.yml"))
+
+    def test_it_builds_the_branch_that_proposed_the_change(self):
+        # Both the image and the build read the proposal's own branch: a
+        # recipe change can move the Dockerfile too.
+        self.assertIn("packages_branch", self.document["jobs"]["image"]["with"])
+        self.assertIn("PACKAGES_BRANCH", self.document["jobs"]["try"]["env"])
+
+    def test_it_cannot_write_to_the_store_it_reads_from(self):
+        self.assertEqual(self.document["jobs"]["try"]["permissions"]["contents"], "read")
+        self.assertEqual(self.document["jobs"]["try"]["permissions"]["packages"], "read")
+
+    def test_a_failed_build_still_reports(self):
+        report = self.document["jobs"]["report"]
+        self.assertIn("always()", report["if"])
+        self.assertIn("needs.try.result", str(report))
+
+    def test_the_command_it_runs_exists(self):
+        from vitasdk_autobuild import main
+        parser = main.build_parser()
+        self.assertIn("try-build", parser._subparsers._group_actions[0].choices)
+
+
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestMaintenanceWorkflow(unittest.TestCase):
     """Unsticking a package must not require a local token."""
 

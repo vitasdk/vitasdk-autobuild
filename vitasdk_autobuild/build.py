@@ -245,6 +245,26 @@ def build_package(package: Package, world: World, packages_dir: str, sdk: str,
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
+def try_build(package: Package, world: World, packages_dir: str, sdk: str,
+              source_date_epoch: str, assets: list[Asset]) -> list[str]:
+    """Builds one package and throws the result away.
+
+    What a proposed recipe change needs answered is only "does this still
+    build", so nothing is uploaded and no failure marker is written: a check
+    on a pull request must not be able to change the queue everyone else is
+    working from.
+    """
+
+    output_dir = tempfile.mkdtemp(prefix="vitasdk-try-")
+    try:
+        install_dependencies(select_dependency_assets(package, world, assets), sdk)
+        produced = run_build(package, world, packages_dir, output_dir,
+                             source_date_epoch, sdk)
+        return expected_outputs(package, world, produced)
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
 def report_failure(package: Package, world: World, failed: gh.Release) -> None:
     """Records a failure so the queue stops retrying it every round."""
 

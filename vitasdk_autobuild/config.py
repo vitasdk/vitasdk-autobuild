@@ -118,6 +118,11 @@ SNAPSHOT_PREFIX = "packages-snapshot-"
 # already in the repository. Empty means "the repository we run in".
 SNAPSHOT_REPO = ""
 
+# Where the staging area lives. Empty means "this repository", which is true
+# for every job of the autobuilder itself. A check running somewhere else —
+# a pull request against the recipes, say — needs to say where to read from.
+AUTOBUILD_REPO = ""
+
 # Runtime after which a worker stops picking up new packages. GitHub kills a
 # job at 6h, and the longest package (icu4c, ffmpeg) needs well under one.
 SOFT_JOB_TIMEOUT = 60 * 60 * 4

@@ -51,6 +51,9 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+      # To ask for a build of each proposal, which is what makes one
+      # mergeable without taking it on faith.
+      actions: write
     env:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
     steps:
@@ -118,6 +121,7 @@ jobs:
             # Force, so a proposal that moved on updates its own pull request
             # instead of opening a second one next week.
             git push --quiet --force "$remote" "follow/$package"
+            head=$(git rev-parse HEAD)
             if [[ -n $(gh pr list --repo "$PACKAGES_REPO" --head "follow/$package" \
                          --state open --json number --jq '.[].number') ]]; then
               echo "  $package: updated the open pull request"
@@ -128,6 +132,28 @@ jobs:
               --title "$package: $version" \
               --body "Opened by vitasdk-autobuild. The version rises, which is
           what makes pacman offer the rebuild; without that the file is
-          republished under the same name and nobody receives it."
+          republished under the same name and nobody receives it.
+
+          A build of this recipe is reported back as a commit status."
             echo "  $package: opened a pull request"
+          done
+
+      - name: Ask for a build of each proposal
+        if: ${{ !inputs.dry_run }}
+        env:
+          # This repository's own token: the build runs here, because the
+          # image is private to this repository.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGES_REPO: vitasdk/packages
+        shell: bash
+        run: |
+          cd "$VITASDK_AUTOBUILD_CACHE/packages"
+          for branch in $(git branch --list 'follow/*' --format '%(refname:short)'); do
+            package=${branch#follow/}
+            head=$(git rev-parse "$branch")
+            gh workflow run try-build.yml --ref "${GITHUB_REF_NAME}" \
+              -f package="$package" \
+              -f packages_branch="$branch" \
+              -f status_sha="$head"
+            echo "  $package: asked for a build"
           done

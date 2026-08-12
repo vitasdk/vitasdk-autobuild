@@ -1,0 +1,114 @@
+name: try-build
+
+# Builds one package from a proposed recipe and reports the result back onto
+# the pull request that proposed it.
+#
+# A diff cannot tell you whether a recipe still builds, and that is the whole
+# question a proposal asks. Nothing is uploaded and no failure marker is
+# written: a check must not be able to change the queue everyone else is
+# working from.
+#
+# It runs here rather than in the recipe repository because the build image is
+# private to this one, and a pull request's own token cannot pull it. The
+# result travels back as a commit status instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which recipe to try
+        required: true
+        type: string
+      packages_branch:
+        description: Branch in the recipe repository holding the proposal
+        required: true
+        type: string
+      world:
+        description: Which world, by architecture (empty means the first one)
+        type: string
+        default: ''
+      status_sha:
+        description: Commit in the recipe repository to report the result on
+        type: string
+        default: ''
+  repository_dispatch:
+    types: [try_build]
+
+permissions: {}
+
+concurrency:
+  group: try-build-${{ inputs.package || github.event.client_payload.package }}-${{ inputs.packages_branch || github.event.client_payload.packages_branch }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      packages_branch: ${{ inputs.packages_branch || github.event.client_payload.packages_branch }}
+
+  try:
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/${{ github.repository }}/build:${{ needs.image.outputs.tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user 0:0
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+      PACKAGES_BRANCH: ${{ inputs.packages_branch || github.event.client_payload.packages_branch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build the proposed recipe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ inputs.package || github.event.client_payload.package }}
+          WORLD: ${{ inputs.world || github.event.client_payload.world }}
+        shell: bash
+        run: |
+          arguments=(try-build --package "$PACKAGE")
+          if [[ -n $WORLD ]]; then
+            arguments+=(--world "$WORLD")
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"
+
+  report:
+    needs: try
+    if: ${{ always() && (inputs.status_sha || github.event.client_payload.status_sha) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Put the result on the proposal
+        env:
+          GH_TOKEN: ${{ secrets.RECIPES_TOKEN }}
+          PACKAGES_REPO: vitasdk/packages
+          SHA: ${{ inputs.status_sha || github.event.client_payload.status_sha }}
+          PACKAGE: ${{ inputs.package || github.event.client_payload.package }}
+          RESULT: ${{ needs.try.result }}
+        shell: bash
+        run: |
+          if [[ -z $GH_TOKEN ]]; then
+            echo '::warning::RECIPES_TOKEN is not set, the proposal keeps no record of this'
+            exit 0
+          fi
+          case $RESULT in
+            success) state=success; description="$PACKAGE builds" ;;
+            failure) state=failure; description="$PACKAGE does not build" ;;
+            *)       state=error;   description="the check did not finish" ;;
+          esac
+          gh api "repos/$PACKAGES_REPO/statuses/$SHA" \
+            -f state="$state" \
+            -f context='vitasdk-autobuild / builds' \
+            -f description="$description" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
