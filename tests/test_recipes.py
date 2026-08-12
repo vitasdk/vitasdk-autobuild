@@ -162,5 +162,30 @@ class TestPlanUpdate(unittest.TestCase):
                 recipes.plan_update(directory, info, directory)
 
 
+class TestSourceRef(unittest.TestCase):
+    """Which upstream ref a recipe actually builds from."""
+
+    def ref_of(self, text):
+        return recipes.source_ref(recipes.find_sources(text)[0])
+
+    def test_no_fragment_means_the_default_branch(self):
+        self.assertEqual(self.ref_of('source=("git+https://x/y.git")'), "HEAD")
+
+    def test_a_named_branch_is_used(self):
+        # cpython and cpython3 share a repository and differ only by branch:
+        # resolving HEAD for both would pin them to the same commit and
+        # silently change what cpython3 builds.
+        self.assertEqual(self.ref_of('source=("git+https://x/y.git#branch=3.11")'), "3.11")
+
+    def test_a_branch_with_dashes_and_underscores(self):
+        self.assertEqual(
+            self.ref_of('source=("git+https://x/y.git#branch=OpenSSL_1_1_1-vita")'),
+            "OpenSSL_1_1_1-vita")
+
+    def test_a_pinned_source_is_never_resolved(self):
+        source = recipes.find_sources('source=("git+https://x/y.git#commit=abc")')[0]
+        self.assertTrue(source.pinned)
+
+
 if __name__ == "__main__":
     unittest.main()

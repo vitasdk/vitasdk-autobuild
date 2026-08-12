@@ -76,8 +76,20 @@ def make_version(base: str, count: int, sha: str) -> str:
     return f"{base}.r{count}.g{sha[:7]}"
 
 
-def resolve(url: str, cache_dir: str) -> tuple[str, int]:
-    """Current commit of a git URL and how many commits lead to it."""
+def source_ref(source: Source) -> str:
+    """Which upstream ref a source actually builds from.
+
+    A recipe naming a branch does not build the default one, and resolving
+    HEAD instead would pin it to a different branch without saying so.
+    """
+
+    if source.fragment.startswith("#branch="):
+        return source.fragment.split("=", 1)[1]
+    return "HEAD"
+
+
+def resolve(url: str, cache_dir: str, ref: str = "HEAD") -> tuple[str, int]:
+    """Current commit of a git ref and how many commits lead to it."""
 
     os.makedirs(cache_dir, exist_ok=True)
     name = re.sub(r"[^A-Za-z0-9._-]", "_", url)
@@ -87,13 +99,15 @@ def resolve(url: str, cache_dir: str) -> tuple[str, int]:
         subprocess.run(["git", "clone", "--quiet", "--bare", "--filter=blob:none", url, path],
                        check=True)
     else:
-        subprocess.run(["git", "-C", path, "fetch", "--quiet", "--force", "origin",
-                        "HEAD:refs/heads/autobuild-head"], check=True)
+        subprocess.run(["git", "-C", path, "fetch", "--quiet", "--force", "--prune",
+                        "origin", "+refs/heads/*:refs/heads/*"], check=True)
 
-    reference = "refs/heads/autobuild-head" if os.path.exists(
-        os.path.join(path, "refs", "heads", "autobuild-head")) else "HEAD"
-    sha = subprocess.run(["git", "-C", path, "rev-parse", reference],
-                         check=True, capture_output=True, text=True).stdout.strip()
+    target = "HEAD" if ref == "HEAD" else f"refs/heads/{ref}"
+    resolved = subprocess.run(["git", "-C", path, "rev-parse", "--verify", "--quiet", target],
+                              capture_output=True, text=True)
+    if resolved.returncode != 0:
+        raise ValueError(f"{url}: no such branch: {ref}")
+    sha = resolved.stdout.strip()
     count = subprocess.run(["git", "-C", path, "rev-list", "--count", sha],
                            check=True, capture_output=True, text=True).stdout.strip()
     return sha, int(count)
@@ -143,7 +157,7 @@ def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
         url = expand(source.url, name, pkgver)
         if "$" in url:
             raise ValueError(f"{name}: cannot resolve source URL {source.url!r}")
-        sha, count = resolve(url, cache_dir)
+        sha, count = resolve(url, cache_dir, source_ref(source))
         pins[source.url] = sha
         if count > newest[0]:
             newest = (count, sha)
