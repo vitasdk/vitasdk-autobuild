@@ -242,6 +242,15 @@ class TestRecipeUpdateWorkflow(unittest.TestCase):
         self.assertIn('git checkout --quiet -B "follow/$package"', body)
         self.assertIn('git apply --include="$package/*"', body)
 
+    def test_every_gh_call_names_the_repository_it_means(self):
+        # These steps run inside the recipe checkout, where gh infers the
+        # repository from the git remote: the recipes, not this one.
+        for step in self.steps:
+            for line in step.get("run", "").splitlines():
+                if line.strip().startswith("gh ") and " api " not in line:
+                    with self.subTest(line=line.strip()):
+                        self.assertIn("--repo", line)
+
     def test_a_proposal_that_moved_updates_its_own_pull_request(self):
         body = self.step("pull request")["run"]
         self.assertIn("--force", body)

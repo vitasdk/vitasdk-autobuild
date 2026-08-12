@@ -151,7 +151,11 @@ jobs:
           for branch in $(git branch --list 'follow/*' --format '%(refname:short)'); do
             package=${branch#follow/}
             head=$(git rev-parse "$branch")
-            gh workflow run try-build.yml --ref "${GITHUB_REF_NAME}" \
+            # Named explicitly: this runs inside the recipe checkout, so gh
+            # would otherwise infer that repository from its remote and look
+            # for the workflow there.
+            gh workflow run try-build.yml --repo "$GITHUB_REPOSITORY" \
+              --ref "${GITHUB_REF_NAME}" \
               -f package="$package" \
               -f packages_branch="$branch" \
               -f status_sha="$head"
