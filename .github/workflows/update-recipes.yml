@@ -12,8 +12,9 @@ on:
         description: Restrict to recipes matching this glob
         type: string
         default: ''
-  schedule:
-    - cron: '0 4 * * 1'
+  # Disabled until the recipe pinning has been reviewed once by hand.
+  # schedule:
+  #   - cron: '0 4 * * 1'
 
 permissions: {}
 

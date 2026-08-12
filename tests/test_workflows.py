@@ -157,8 +157,11 @@ class TestSupervisorWorkflow(unittest.TestCase):
     def test_only_one_supervisor_runs_at_a_time(self):
         self.assertEqual(self.document["concurrency"]["group"], "autobuild-supervisor")
 
-    def test_it_runs_on_a_schedule(self):
-        self.assertIn("schedule", triggers(self.document))
+    def test_it_can_be_started_by_hand(self):
+        # The nightly schedule is commented out until a supervised run has
+        # been verified once; only the manual trigger is live.
+        self.assertIn("workflow_dispatch", triggers(self.document))
+        self.assertNotIn("schedule", triggers(self.document))
 
 
 if __name__ == "__main__":

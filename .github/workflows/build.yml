@@ -11,8 +11,10 @@ on:
         description: Show the plan without dispatching workers
         type: boolean
         default: false
-  schedule:
-    - cron: '0 3 * * *'
+  # Disabled until the first supervised run has been verified by hand.
+  # Re-enable together with the cron in update-recipes.yml.
+  # schedule:
+  #   - cron: '0 3 * * *'
 
 permissions: {}
 
