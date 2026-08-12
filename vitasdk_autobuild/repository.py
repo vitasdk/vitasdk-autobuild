@@ -73,6 +73,11 @@ def create_database(packages_dir: str, input_dir: str, output_dir: str,
 
     run([
         "docker", "run", "--rm", "--platform", "linux/amd64",
+        # The repository script creates its output with mktemp, which is
+        # readable only by its owner. Writing as the calling user keeps the
+        # result usable by whoever asked for it instead of by root.
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "--env", "HOME=/tmp",
         "--mount", f"type=bind,source={os.path.abspath(packages_dir)},target=/workspace,readonly",
         "--mount", f"type=bind,source={os.path.abspath(input_dir)},target=/input,readonly",
         "--mount", f"type=bind,source={parent},target=/output",

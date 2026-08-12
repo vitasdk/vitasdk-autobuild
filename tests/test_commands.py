@@ -252,6 +252,35 @@ class TestMachineReadableOutput(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertTrue(lines[0].startswith(config.CORE_SNAPSHOT))
 
+class TestRepositoryGeneration(unittest.TestCase):
+
+    def test_the_container_writes_as_the_calling_user(self):
+        # The repository script uses mktemp, whose output only its owner can
+        # read. As root that leaves a directory the runner cannot even list.
+        import os
+        from unittest import mock
+        from vitasdk_autobuild import repository
+
+        with mock.patch.object(repository, "run") as run:
+            with mock.patch("os.path.exists", return_value=False):
+                with mock.patch("os.makedirs"):
+                    repository.create_database("/pkgs", "/in", "/tmp/out/repository", "1")
+        arguments = run.call_args[0][0]
+        self.assertIn("--user", arguments)
+        self.assertEqual(arguments[arguments.index("--user") + 1],
+                         f"{os.getuid()}:{os.getgid()}")
+
+    def test_the_repository_name_reaches_the_script(self):
+        from unittest import mock
+        from vitasdk_autobuild import config, repository
+
+        with mock.patch.object(repository, "run") as run:
+            with mock.patch("os.path.exists", return_value=False):
+                with mock.patch("os.makedirs"):
+                    repository.create_database("/pkgs", "/in", "/tmp/out/repository", "1")
+        arguments = run.call_args[0][0]
+        self.assertIn(f"REPOSITORY_NAME={config.REPOSITORY_NAME}", arguments)
+
 
 if __name__ == "__main__":
     unittest.main()
