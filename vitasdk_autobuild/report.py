@@ -162,9 +162,16 @@ def running_jobs(jobs: Iterable[dict[str, Any]]) -> list[dict[str, str]]:
     return sorted(running, key=lambda j: (j["started_at"], j["html_url"]))
 
 
-def table_of_updates(updates: Iterable[Any]) -> str:
-    """What a recipe following a branch would be pinned to."""
+KIND_LABELS = {
+    "pin": "pin loose source",
+    "advance": "take today's upstream",
+    "release": "take upstream release",
+}
 
-    return table(["Package", "Now", "Would become"],
-                 [(u.name, u.old_version, u.new_version)
-                  for u in sorted(updates, key=lambda u: u.name)])
+
+def table_of_updates(updates: Iterable[Any]) -> str:
+    """What each proposal would change, and which kind of decision it is."""
+
+    return table(["Package", "Proposal", "Now", "Would become"],
+                 [(u.name, KIND_LABELS.get(u.kind, u.kind), u.old_version, u.new_version)
+                  for u in sorted(updates, key=lambda u: (u.kind, u.name))])

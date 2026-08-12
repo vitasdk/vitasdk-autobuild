@@ -1,26 +1,49 @@
 name: update-recipes
 
-# Recipes that follow a git branch are pinned to the commit that is actually
-# being served, and the commit goes into the version. Noticing that upstream
-# moved is the scheduler's job; deciding to take it is the maintainer's, so
-# this opens a pull request and never pushes.
+# Proposes recipe changes to the maintainers, one pull request per package.
+#
+# Three kinds of proposal, in order of how much they claim:
+#
+#   pin       a source that follows a moving ref is frozen at what is being
+#             served today. Housekeeping: it says nothing about upstream.
+#   advance   a pinned source takes what its _follow ref points at now. This
+#             is taking today's upstream, whatever state it is in.
+#   release   upstream published a tag that is genuinely ahead of the commit
+#             we build, so the recipe can name a real version.
+#
+# Noticing is this job's business; taking it is the maintainer's, so it opens
+# pull requests and never pushes to the recipes.
 
 on:
   workflow_dispatch:
     inputs:
+      propose:
+        description: Which proposals to make
+        type: choice
+        default: pin
+        options:
+          - pin
+          - pin,advance
+          - pin,advance,release
+          - advance
+          - release
       only:
         description: Restrict to recipes matching this glob
         type: string
         default: ''
       dry_run:
-        description: Only report what would be pinned, editing nothing
+        description: Only report what would change, editing nothing
         type: boolean
         default: false
-  # Disabled until the recipe pinning has been reviewed once by hand.
+  # Disabled until a supervised run has opened pull requests once by hand.
   # schedule:
   #   - cron: '0 4 * * 1'
 
 permissions: {}
+
+concurrency:
+  group: update-recipes
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -35,13 +58,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Pin the recipes that follow a branch
+      - name: Work out what could change
         env:
           ONLY: ${{ inputs.only }}
+          PROPOSE: ${{ inputs.propose }}
           DRY_RUN: ${{ inputs.dry_run }}
         shell: bash
         run: |
           arguments=(update-recipes)
+          for kind in ${PROPOSE//,/ }; do
+            arguments+=(--propose "$kind")
+          done
           if [[ $DRY_RUN != 'true' ]]; then
             arguments+=(--write)
           fi
@@ -50,31 +77,57 @@ jobs:
           fi
           python3 -m vitasdk_autobuild "${arguments[@]}"
 
-      - name: Open a pull request against the recipes
+      - name: Open one pull request per package
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.RECIPES_TOKEN }}
           PACKAGES_REPO: vitasdk/packages
+          PACKAGES_BRANCH: next
         shell: bash
         run: |
           cd "$VITASDK_AUTOBUILD_CACHE/packages"
           if git diff --quiet; then
-            echo 'Every recipe is already pinned to the current commit.'
+            echo 'Nothing to propose.'
             exit 0
           fi
           if [[ -z $GH_TOKEN ]]; then
-            echo '::error::RECIPES_TOKEN is required to open a pull request against the recipes'
+            echo '::error::RECIPES_TOKEN is required to open pull requests against the recipes'
             git --no-pager diff --stat
             exit 1
           fi
-          branch="pin-recipes-$(date -u +%Y%m%d)"
+
           git config user.name 'vitasdk-autobuild'
           git config user.email 'vitasdk-autobuild@users.noreply.github.com'
-          git checkout -b "$branch"
-          git commit --all \
-            --message 'recipes: pin git sources to the commit being served' \
-            --message 'Every source that followed a branch now names a commit, and the commit is part of the version. Without it the published file name never changes, so pacman never offers the update and the autobuilder cannot tell a rebuild is needed.'
-          git push --quiet "https://x-access-token:${GH_TOKEN}@github.com/${PACKAGES_REPO}.git" "$branch"
-          gh pr create --repo "$PACKAGES_REPO" --head "$branch" \
-            --title 'Pin git sources to the commit being served' \
-            --body 'Opened automatically by vitasdk-autobuild.'
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${PACKAGES_REPO}.git"
+          base=$(git rev-parse HEAD)
+          patch="$RUNNER_TEMP/proposals.patch"
+          git diff > "$patch"
+
+          # One package at a time: a proposal that turns out to be wrong should
+          # not hold back the ones that are right, and a package is the unit a
+          # maintainer actually decides about.
+          mapfile -t changed < <(git diff --name-only | cut -d/ -f1 | sort -u)
+          echo "Proposing changes for ${#changed[@]} package(s)"
+          for package in "${changed[@]}"; do
+            git checkout --quiet --force "$base"
+            git clean --quiet -fd
+            git checkout --quiet -B "follow/$package"
+            git apply --include="$package/*" "$patch"
+            version=$(sed -n 's/^pkgver=//p' "$package/VITABUILD" | head -n1)
+            git commit --quiet --all --message "$package: $version"
+            # Force, so a proposal that moved on updates its own pull request
+            # instead of opening a second one next week.
+            git push --quiet --force "$remote" "follow/$package"
+            if [[ -n $(gh pr list --repo "$PACKAGES_REPO" --head "follow/$package" \
+                         --state open --json number --jq '.[].number') ]]; then
+              echo "  $package: updated the open pull request"
+              continue
+            fi
+            gh pr create --repo "$PACKAGES_REPO" \
+              --base "$PACKAGES_BRANCH" --head "follow/$package" \
+              --title "$package: $version" \
+              --body "Opened by vitasdk-autobuild. The version rises, which is
+          what makes pacman offer the rebuild; without that the file is
+          republished under the same name and nobody receives it."
+            echo "  $package: opened a pull request"
+          done

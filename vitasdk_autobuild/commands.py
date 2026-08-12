@@ -464,6 +464,19 @@ def cmd_update_recipes(args: Any) -> None:
     cache = recipes.recipe_cache_dir(state.cache_root())
     makepkg = srcinfo.find_vita_makepkg()
 
+    # In order of how much they claim: pinning a loose source states nothing
+    # about upstream, taking today's commit takes what happens to be there,
+    # and taking a release takes what upstream decided to call finished. The
+    # first one that applies to a recipe is the one proposed, so a package
+    # cannot be pinned and advanced in the same breath.
+    planners = {
+        "pin": recipes.plan_update,
+        "advance": recipes.plan_advance,
+        "release": recipes.plan_release,
+    }
+    wanted = [kind for kind in ("pin", "advance", "release")
+              if kind in (args.propose or ["pin"])]
+
     updates: list[recipes.Update] = []
     problems: list[str] = []
     for info in srcinfo.collect(packages_dir):
@@ -471,12 +484,17 @@ def cmd_update_recipes(args: Any) -> None:
         if args.only and not fnmatch.fnmatch(name, args.only):
             continue
         package_dir = os.path.join(packages_dir, info["repo_path"])
-        try:
-            update = recipes.plan_update(package_dir, info, cache)
-        except (ValueError, subprocess.CalledProcessError) as e:
-            problems.append(str(e))
-            continue
-        if update is None or not update.changed:
+        update = None
+        for kind in wanted:
+            try:
+                update = planners[kind](package_dir, info, cache)
+            except (ValueError, subprocess.CalledProcessError) as e:
+                problems.append(str(e))
+                break
+            if update is not None and update.changed:
+                break
+            update = None
+        if update is None:
             continue
         updates.append(update)
         if args.write:
@@ -491,8 +509,8 @@ def cmd_update_recipes(args: Any) -> None:
         print(f"PROBLEM: {problem}", flush=True)
 
     if not args.write:
-        notice(f"{len(updates)} recipe(s) would be pinned; pass --write to apply")
+        notice(f"{len(updates)} recipe(s) would change; pass --write to apply")
     else:
-        notice(f"{len(updates)} recipe(s) pinned in {packages_dir}")
+        notice(f"{len(updates)} recipe(s) rewritten in {packages_dir}")
     if problems:
         raise SystemExit(f"{len(problems)} recipe(s) could not be updated")

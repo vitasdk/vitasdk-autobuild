@@ -299,5 +299,64 @@ class TestSetCore(unittest.TestCase):
         self.assertIn('core="sdk-snapshot-test"', updated)
 
 
+class TestFollowDeclaration(unittest.TestCase):
+    """Pinning destroys the ref a recipe came from, so it has to be written down."""
+
+    def test_a_scalar_applies_to_every_git_source(self):
+        text = "source=('git+https://a.git' 'git+https://b.git')\n_follow=master\n"
+        sources = [s for s in recipes.find_sources(text) if s.protocol == "git"]
+        self.assertEqual(set(recipes.follow_refs(text, sources).values()), {"master"})
+
+    def test_an_array_is_matched_to_the_sources_in_order(self):
+        text = "source=('git+https://a.git' 'git+https://b.git')\n_follow=('main' 'v2')\n"
+        sources = [s for s in recipes.find_sources(text) if s.protocol == "git"]
+        self.assertEqual(list(recipes.follow_refs(text, sources).values()), ["main", "v2"])
+
+    def test_a_mismatched_array_is_refused_rather_than_guessed(self):
+        text = "source=('git+https://a.git')\n_follow=('main' 'v2')\n"
+        sources = [s for s in recipes.find_sources(text) if s.protocol == "git"]
+        with self.assertRaises(ValueError):
+            recipes.follow_refs(text, sources)
+
+    def test_a_silent_recipe_follows_nothing(self):
+        text = "source=('git+https://a.git')\n"
+        sources = [s for s in recipes.find_sources(text) if s.protocol == "git"]
+        self.assertEqual(recipes.follow_refs(text, sources), {})
+
+
+class TestReleaseProposals(unittest.TestCase):
+    """A tag is only worth proposing if it is really ahead of where we are."""
+
+    def test_a_letter_with_a_number_is_a_prerelease(self):
+        # Python publishes 3.11.0a5 before 3.11.0, and pacman would call it an
+        # upgrade over a version carrying rNNNN because a digit beats a letter.
+        self.assertTrue(recipes.is_prerelease("3.11.0a5"))
+        self.assertTrue(recipes.is_prerelease("1.7.0beta89"))
+        self.assertTrue(recipes.is_prerelease("2.0.0-alpha"))
+
+    def test_a_bare_letter_is_a_patch_release(self):
+        # OpenSSL's 1.0.2a is a released version, not a preview of 1.0.2.
+        self.assertFalse(recipes.is_prerelease("1.0.2a"))
+        self.assertFalse(recipes.is_prerelease("1.1.1w"))
+
+    def test_the_newest_tag_is_picked_by_version_not_by_name(self):
+        self.assertGreater(recipes.version_key("1.10"), recipes.version_key("1.9"))
+        self.assertGreater(recipes.version_key("1.2"),
+                           recipes.version_key("0.0.0.r1430.g3dddc43"))
+
+    def test_a_tag_prefix_is_not_part_of_the_version(self):
+        self.assertEqual(recipes.tag_version("v1.2.3"), "1.2.3")
+        self.assertEqual(recipes.tag_version("release-2.0"), "2.0")
+        # A hyphen would be read as the start of the release, so it cannot
+        # survive into a version.
+        self.assertEqual(recipes.tag_version("vita-fix"), "vita_fix")
+        self.assertEqual(recipes.tag_version("1.0-rc2"), "1.0_rc2")
+
+    def test_the_version_line_is_respected(self):
+        self.assertEqual(recipes.major_of("2.7.r81103.g4f6d059"), "2")
+        self.assertNotEqual(recipes.major_of("3.11.0a5"), recipes.major_of("2.7"))
+
+
+
 if __name__ == "__main__":
     unittest.main()

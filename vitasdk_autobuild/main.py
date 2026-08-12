@@ -86,6 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--write", action="store_true",
                         help="edit the recipes instead of only reporting")
     update.add_argument("--only", help="restrict to recipes matching this glob")
+    update.add_argument("--propose", action="append",
+                        choices=["pin", "advance", "release"],
+                        help="which proposals to make (default: pin only)")
     update.set_defaults(func=commands.cmd_update_recipes)
 
     clean = subparsers.add_parser(

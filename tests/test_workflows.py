@@ -217,17 +217,43 @@ class TestRecipeUpdateWorkflow(unittest.TestCase):
         self.assertIs(inputs["dry_run"]["default"], False)
 
     def test_a_dry_run_neither_edits_nor_opens_a_pull_request(self):
-        pin = self.step("Pin the recipes")
-        self.assertIn("if [[ $DRY_RUN != 'true' ]]; then", pin["run"])
-        self.assertIn("arguments+=(--write)", pin["run"])
+        plan = self.step("could change")
+        self.assertIn("if [[ $DRY_RUN != 'true' ]]; then", plan["run"])
+        self.assertIn("arguments+=(--write)", plan["run"])
         self.assertIn("dry_run", self.step("pull request")["if"])
+
+    def test_every_offered_proposal_is_one_the_command_knows(self):
+        from vitasdk_autobuild import main
+        parser = main.build_parser()
+        known = set()
+        for action in parser._subparsers._group_actions[0].choices["update-recipes"]._actions:
+            if action.dest == "propose":
+                known = set(action.choices)
+        offered = triggers(self.document)["workflow_dispatch"]["inputs"]["propose"]["options"]
+        for option in offered:
+            for kind in option.split(","):
+                with self.subTest(kind=kind):
+                    self.assertIn(kind, known)
+
+    def test_each_package_gets_its_own_pull_request(self):
+        # A wrong proposal for one package must not hold back the right ones,
+        # and a package is the unit a maintainer decides about.
+        body = self.step("pull request")["run"]
+        self.assertIn('git checkout --quiet -B "follow/$package"', body)
+        self.assertIn('git apply --include="$package/*"', body)
+
+    def test_a_proposal_that_moved_updates_its_own_pull_request(self):
+        body = self.step("pull request")["run"]
+        self.assertIn("--force", body)
+        self.assertIn("gh pr list", body)
 
     def test_it_never_pushes_to_the_recipes_directly(self):
         # Noticing that upstream moved is this job's business; taking it is
         # the maintainer's, so the only way out is a pull request.
         body = self.step("pull request")["run"]
         self.assertIn("gh pr create", body)
-        self.assertNotIn("packages.git\" master", body)
+        for branch in ("master", "next"):
+            self.assertNotIn(f'"$remote" "{branch}"', body)
 
     def test_the_job_cannot_write_to_its_own_repository(self):
         self.assertEqual(self.document["jobs"]["update"]["permissions"]["contents"], "read")

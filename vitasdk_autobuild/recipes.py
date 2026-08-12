@@ -7,13 +7,16 @@ be answered by looking at a file name. Pinning the commit and putting it in
 the version fixes both at once.
 """
 
+import functools
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, replace
 
 from . import srcinfo
+from . import version as version_module
 
 # A source entry such as git+https://github.com/xerpi/libvita2d.git#commit=abc
 VCS_SOURCE = re.compile(
@@ -32,6 +35,8 @@ UNVERSIONED_BASE = "0.0.0"
 
 LIVE_VERSIONS = ("9999", "99999999")
 
+FOLLOW_LINE = re.compile(r"^_follow=(.+)$", re.MULTILINE)
+
 
 @dataclass(frozen=True)
 class Source:
@@ -46,6 +51,42 @@ class Source:
     @property
     def text(self) -> str:
         return f"{self.protocol}+{self.url}{self.fragment}"
+
+
+def declared_follow(text: str) -> list[str]:
+    """The upstream refs a recipe says it tracks.
+
+    Pinning a source to a commit throws away the branch it came from, and
+    without that the only thing a follow job could do is guess the default
+    branch, which is wrong exactly where it matters: a recipe on a maintenance
+    branch would silently jump to the next major version.
+
+    A single value applies to every git source; an array is matched to them in
+    order.
+    """
+
+    match = FOLLOW_LINE.search(text)
+    if match is None:
+        return []
+    value = match.group(1).strip()
+    if value.startswith("(") and value.endswith(")"):
+        return [item.strip("'\"") for item in shlex.split(value[1:-1]) if item.strip("'\"")]
+    value = value.strip("'\"")
+    return [value] if value else []
+
+
+def follow_refs(text: str, git_sources: list["Source"]) -> dict["Source", str]:
+    """Which ref each git source follows, or nothing if the recipe is silent."""
+
+    declared = declared_follow(text)
+    if not declared:
+        return {}
+    if len(declared) == 1:
+        return {source: declared[0] for source in git_sources}
+    if len(declared) != len(git_sources):
+        raise ValueError(
+            f"_follow lists {len(declared)} ref(s) for {len(git_sources)} git source(s)")
+    return dict(zip(git_sources, declared))
 
 
 def find_sources(text: str) -> list[Source]:
@@ -118,6 +159,96 @@ def resolve(url: str, cache_dir: str, ref: str = "HEAD") -> tuple[str, int]:
     return sha, int(count)
 
 
+def upstream_tags(url: str, cache_dir: str) -> list[str]:
+    """Every tag upstream publishes, newest version first.
+
+    Read from the mirror rather than ls-remote so the peeled entries git adds
+    for annotated tags are not mistaken for separate releases.
+    """
+
+    path = _mirror(url, cache_dir)
+    listed = subprocess.run(["git", "-C", path, "tag", "--list"],
+                            check=True, capture_output=True, text=True)
+    tags = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    return sorted(tags, key=lambda tag: version_key(tag_version(tag)), reverse=True)
+
+
+# Two conventions, and they have to be told apart: a bare letter after a
+# number is a patch release for OpenSSL (1.0.2a) while a letter followed by a
+# number is a prerelease for Python (3.11.0a5).
+PRERELEASE = re.compile(r"(?:^|[._\-])(?:alpha|beta|rc|pre|dev|snapshot)\d*(?:$|[._\-])|"
+                        r"\d(?:alpha|beta|rc|pre|a|b)\d+$", re.IGNORECASE)
+
+
+def is_prerelease(version: str) -> bool:
+    """Whether a version names something upstream is still working on.
+
+    Proposing one of these is worse than proposing nothing: pacman sees a
+    numeric segment where the current version has a letter and calls it an
+    upgrade, so an alpha would be handed to everyone as if it were newer than
+    the branch the recipe actually tracks.
+    """
+
+    return bool(PRERELEASE.search(version.strip()))
+
+
+def major_of(version: str) -> str:
+    """The leading number, which is the line a recipe lives on."""
+
+    match = re.match(r"\d+", version.strip())
+    return match.group(0) if match else ""
+
+
+def tag_version(tag: str) -> str:
+    """The version a tag names, as a version a recipe may legally carry.
+
+    A hyphen cannot appear in a pkgver: pacman reads everything after it as
+    the release, so `1.0-rc2` would compare equal to `1.0` and the update
+    would never be offered. Replaced rather than rejected, which is the same
+    thing every distribution does with these tags.
+    """
+
+    stripped = tag.strip()
+    for prefix in ("version-", "version_", "release-", "release_", "v", "V"):
+        if stripped.startswith(prefix) and stripped[len(prefix):len(prefix) + 1].isdigit():
+            stripped = stripped[len(prefix):]
+            break
+    return stripped.replace("-", "_").replace(":", "_")
+
+
+def version_key(version: str):
+    """Orders versions exactly as pacman does."""
+
+    return functools.cmp_to_key(version_module.vercmp)(version)
+
+
+def commit_of(url: str, cache_dir: str, ref: str) -> str:
+    """The commit a tag or branch points at, following annotated tags."""
+
+    path = _mirror(url, cache_dir)
+    resolved = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        capture_output=True, text=True)
+    if resolved.returncode != 0:
+        raise ValueError(f"{url}: cannot resolve {ref}")
+    return resolved.stdout.strip()
+
+
+def is_ahead(url: str, cache_dir: str, older: str, newer_sha: str) -> bool:
+    """Whether one commit really contains the other.
+
+    The decisive question about a tag, and the one a version string cannot
+    answer. cpython3 builds a commit on the 3.11 branch that is well past the
+    3.11.0a5 tag, yet pacman reads 3.11.0a5 as the higher version because a
+    digit outranks a letter. Only history knows which is actually newer.
+    """
+
+    path = _mirror(url, cache_dir)
+    return subprocess.run(
+        ["git", "-C", path, "merge-base", "--is-ancestor", older, newer_sha],
+        capture_output=True).returncode == 0
+
+
 def count_commits(url: str, cache_dir: str, sha: str) -> tuple[str, int]:
     """How many commits lead to a commit a recipe is already pinned to."""
 
@@ -130,25 +261,38 @@ def count_commits(url: str, cache_dir: str, sha: str) -> tuple[str, int]:
 
 
 def rewrite(text: str, pkgver: str, pins: dict[str, str]) -> str:
-    """Sets the version, resets the release, and pins every listed source."""
+    """Sets the version, resets the release, and repins every listed source.
+
+    A pin is a whole fragment rather than a bare commit, because moving to a
+    release means naming a tag and that is the same edit.
+    """
 
     updated = PKGVER_LINE.sub(f"pkgver={pkgver}", text, count=1)
     updated = PKGREL_LINE.sub("pkgrel=1", updated, count=1)
     for source in find_sources(updated):
-        sha = pins.get(source.url)
-        if sha is None:
+        fragment = pins.get(source.url)
+        if fragment is None:
             continue
-        pinned = replace(source, fragment=f"#commit={sha}")
-        updated = updated.replace(source.text, pinned.text)
+        if not fragment.startswith("#"):
+            fragment = f"#commit={fragment}"
+        updated = updated.replace(source.text, replace(source, fragment=fragment).text)
     return updated
 
 
 @dataclass
 class Update:
+    """One proposed change to one recipe.
+
+    The kind is not decoration: pinning a loose source is housekeeping, moving
+    a pin forward is taking today's upstream, and switching to a tag is taking
+    a release. They deserve separate decisions, so they travel separately.
+    """
+
     name: str
     old_version: str
     new_version: str
     pins: dict[str, str]
+    kind: str = "pin"
 
     @property
     def changed(self) -> bool:
@@ -210,6 +354,101 @@ def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
     count, sha = newest
     return Update(name=name, old_version=pkgver,
                   new_version=make_version(version_base(pkgver), count, sha), pins=pins)
+
+
+def plan_advance(package_dir: str, info: dict, cache_dir: str) -> Update | None:
+    """What a recipe would say if it took what its _follow ref points at today.
+
+    Silent unless the recipe declares what it follows: guessing the default
+    branch would move a package onto a line upstream never meant it to be on.
+    """
+
+    with open(os.path.join(package_dir, "VITABUILD"), encoding="utf-8") as handle:
+        text = handle.read()
+
+    name, pkgver = info["pkgbase"], info["pkgver"]
+    git_sources = [s for s in find_sources(text) if s.protocol == "git"]
+    refs = follow_refs(text, git_sources)
+    if not refs:
+        return None
+
+    evaluated = evaluated_sources(git_sources, info)
+    pins: dict[str, str] = {}
+    newest: tuple[int, str] = (0, "")
+    for source in git_sources:
+        actual = evaluated.get(source, source)
+        url = expand(actual.url, name, pkgver)
+        if "$" in url:
+            raise ValueError(f"{name}: cannot resolve source URL {source.url!r}")
+        sha, count = resolve(url, cache_dir, refs[source])
+        if not actual.fragment.startswith(f"#commit={sha}"):
+            pins[source.url] = sha
+        if count > newest[0]:
+            newest = (count, sha)
+
+    if not pins:
+        return None
+    count, sha = newest
+    return Update(name=name, old_version=pkgver, kind="advance",
+                  new_version=make_version(version_base(pkgver), count, sha), pins=pins)
+
+
+def current_pin(source: Source) -> str:
+    """The ref a source builds from today, whatever form it was written in."""
+
+    if source.fragment.startswith(("#commit=", "#tag=")):
+        return source.fragment.split("=", 1)[1]
+    if source.fragment.startswith("#branch="):
+        return source.fragment.split("=", 1)[1]
+    return "HEAD"
+
+
+def plan_release(package_dir: str, info: dict, cache_dir: str) -> Update | None:
+    """Whether upstream has published a tag worth moving to.
+
+    A tag is a statement that upstream considers something finished, which a
+    commit never is. It is proposed and never taken automatically: a release
+    can change the build as much as the version.
+    """
+
+    with open(os.path.join(package_dir, "VITABUILD"), encoding="utf-8") as handle:
+        text = handle.read()
+
+    name, pkgver = info["pkgbase"], info["pkgver"]
+    git_sources = [s for s in find_sources(text) if s.protocol == "git"]
+    if len(git_sources) != 1:
+        # With several sources there is no single upstream release to move to.
+        return None
+    source = git_sources[0]
+    evaluated = evaluated_sources(git_sources, info).get(source, source)
+    url = expand(evaluated.url, name, pkgver)
+    if "$" in url:
+        raise ValueError(f"{name}: cannot resolve source URL {source.url!r}")
+
+    current_is_prerelease = is_prerelease(pkgver)
+    try:
+        current_sha = commit_of(url, cache_dir, current_pin(evaluated))
+    except ValueError:
+        return None
+
+    for tag in upstream_tags(url, cache_dir):
+        if evaluated.fragment == f"#tag={tag}":
+            return None
+        version = tag_version(tag)
+        if is_prerelease(version) and not current_is_prerelease:
+            continue
+        if not version_module.newer(version, pkgver):
+            # pacman would never hand it over, so proposing it is proposing a
+            # package that gets built and never installed.
+            continue
+        tag_sha = commit_of(url, cache_dir, tag)
+        if tag_sha == current_sha or not is_ahead(url, cache_dir, current_sha, tag_sha):
+            continue
+        break
+    else:
+        return None
+    return Update(name=name, old_version=pkgver, new_version=version, kind="release",
+                  pins={source.url: f"#tag={tag}"})
 
 
 def apply_update(package_dir: str, update: Update, makepkg: str) -> None:
