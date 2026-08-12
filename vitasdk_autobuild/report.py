@@ -1,8 +1,9 @@
 """What the queue looks like, for humans and for the website."""
 
+import time
 from typing import Any, Iterable
 
-from . import config
+from . import config, queue
 from .config import World
 from .queue import Package, PackageStatus, get_cycles
 from .utils import group, table
@@ -65,7 +66,10 @@ def summary_line(packages: Iterable[Package], worlds: Iterable[World] | None = N
 
 def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
                  packages_revision: str,
-                 worlds: Iterable[World] | None = None) -> dict[str, Any]:
+                 worlds: Iterable[World] | None = None,
+                 built_at: dict[str, float] | None = None,
+                 downloads: dict[str, int] | None = None,
+                 generated_at: float | None = None) -> dict[str, Any]:
     """The machine readable state, uploaded as status.json.
 
     This is the only thing the website reads, so it has to carry everything a
@@ -74,6 +78,8 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
 
     packages = sorted(packages, key=lambda p: p.name)
     configured = list(worlds) if worlds is not None else config.worlds()
+    built_at = built_at or {}
+    downloads = downloads or {}
 
     entries = []
     for package in packages:
@@ -83,10 +89,18 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
                 continue
             details = dict(package.get_details(world))
             details.pop("blocked", None)
-            builds[world.arch] = {
+            files = queue.asset_names(package, world, built_at)
+            build = {
                 "status": str(package.get_status(world)),
                 "details": details,
             }
+            # When a package was built, and how much it is downloaded, are
+            # facts only the release knows. Carrying them here is what lets
+            # the catalogue answer "what changed last night".
+            if files:
+                build["built_at"] = max(built_at[name] for name in files)
+                build["downloads"] = sum(downloads.get(name, 0) for name in files)
+            builds[world.arch] = build
         entries.append({
             "name": package.name,
             "version": package.version,
@@ -102,6 +116,7 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
 
     return {
         "schema_version": 2,
+        "generated_at": generated_at if generated_at is not None else time.time(),
         "worlds": [
             {
                 "arch": world.arch,

@@ -186,6 +186,7 @@ class Asset:
     url: str
     download_url: str
     created_at: float = 0.0
+    downloads: int = 0
 
     @property
     def filename(self) -> str:
@@ -243,6 +244,7 @@ def _parse_asset(data: dict[str, Any]) -> Asset:
         url=data["url"],
         download_url=data["browser_download_url"],
         created_at=parse_timestamp(data.get("created_at", "")),
+        downloads=data.get("download_count", 0),
     )
 
 

@@ -156,6 +156,31 @@ class TestPublishingAcrossWorlds(unittest.TestCase):
         self.assertEqual(builds["vita-musl"]["status"], "waiting-for-build")
         self.assertEqual([w["arch"] for w in status["worlds"]], ["vita", "vita-musl"])
 
+class TestStatusCarriesFacts(unittest.TestCase):
+    """The catalogue cannot ask a second question, so the file answers first."""
+
+    def test_build_time_and_downloads_travel_with_the_package(self):
+        zlib = make_package("zlib", "1.3.2-2", worlds=BOTH)
+        apply([zlib], done=["zlib-1.3.2-2-vita.pkg.tar.xz"])
+        status = report.build_status(
+            [zlib], [], "rev", BOTH,
+            built_at={"zlib-1.3.2-2-vita.pkg.tar.xz": 1000.0},
+            downloads={"zlib-1.3.2-2-vita.pkg.tar.xz": 7})
+        build = status["packages"][0]["builds"]["vita"]
+        self.assertEqual(build["built_at"], 1000.0)
+        self.assertEqual(build["downloads"], 7)
+
+    def test_a_package_that_was_never_built_carries_no_time(self):
+        zlib = make_package("zlib", worlds=BOTH)
+        apply([zlib])
+        status = report.build_status([zlib], [], "rev", BOTH)
+        self.assertNotIn("built_at", status["packages"][0]["builds"]["vita"])
+
+    def test_the_file_says_when_it_was_written(self):
+        # Without this the catalogue cannot tell fresh data from a stale copy.
+        status = report.build_status([], [], "rev", BOTH, generated_at=1234.0)
+        self.assertEqual(status["generated_at"], 1234.0)
+
 
 if __name__ == "__main__":
     unittest.main()

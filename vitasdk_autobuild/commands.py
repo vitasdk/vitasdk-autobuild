@@ -84,8 +84,10 @@ def collect_jobs() -> list[dict[str, str]]:
 
 
 def update_status(snapshot: state.Snapshot) -> None:
-    status = report.build_status(snapshot.packages, collect_jobs(),
-                                 snapshot.packages_revision)
+    status = report.build_status(
+        snapshot.packages, collect_jobs(), snapshot.packages_revision,
+        built_at=snapshot.built_at,
+        downloads={a.filename: a.downloads for a in snapshot.staging_assets})
     content = json.dumps(status, indent=2).encode() + b"\n"
     gh.upload_asset(state.status_release(), "status.json", content=content, replace=True)
 
