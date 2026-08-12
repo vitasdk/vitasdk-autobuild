@@ -86,6 +86,7 @@ class Snapshot:
     packages_dir: str
     packages_revision: str
     published_tag: str
+    published_snapshots: list[dict]
 
     @property
     def built_at(self) -> dict[str, float]:
@@ -147,6 +148,7 @@ def get_queue_with_status(full_details: bool = False,
         packages_dir=packages_dir,
         packages_revision=packages_revision(packages_dir),
         published_tag=published_tag,
+        published_snapshots=repodb.get_published_snapshots(),
     )
 
 

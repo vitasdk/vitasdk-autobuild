@@ -84,6 +84,27 @@ class TestStatusFile(unittest.TestCase):
         self.assertEqual(entry["libpng"]["depends"], ["zlib"])
         self.assertEqual(entry["libpng"]["builds"][WORLD.arch]["status"], "waiting-for-build")
 
+    def test_the_repository_versions_are_attributed_to_a_snapshot(self):
+        # "in the repository" names a version; without the tag it never says
+        # which repository, and the published snapshots are the only history
+        # there is.
+        status = report.build_status(
+            queue_of(), [], "rev", [WORLD],
+            published_tag="packages-snapshot-20260812.1.1",
+            snapshot_repo="vitasdk/vitasdk-autobuild",
+            published_snapshots=[{"tag": "packages-snapshot-20260812.1.1",
+                                  "published_at": "2026-08-12T18:47:27Z",
+                                  "core_snapshot": "sdk-snapshot-20260812.565.1"}])
+        self.assertEqual(status["published_tag"], "packages-snapshot-20260812.1.1")
+        self.assertEqual(status["published_snapshots"][0]["core_snapshot"],
+                         "sdk-snapshot-20260812.565.1")
+        self.assertEqual(status["snapshot_repo"], "vitasdk/vitasdk-autobuild")
+
+    def test_nothing_published_yet_is_not_an_error(self):
+        status = report.build_status(queue_of(), [], "rev", [WORLD])
+        self.assertEqual(status["published_tag"], "")
+        self.assertEqual(status["published_snapshots"], [])
+
     def test_status_is_json_serialisable(self):
         packages = queue_of(make_package("zlib"))
         apply_status(packages, [], [])

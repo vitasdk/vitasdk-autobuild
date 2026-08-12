@@ -6,8 +6,11 @@ and only the second one can be broken by publishing a dependency alone.
 """
 
 import io
+import json
 import os
 import tarfile
+
+from typing import Any
 
 from . import config, gh
 
@@ -34,6 +37,42 @@ def parse_database(data: bytes) -> dict[str, str]:
             if "NAME" in fields and "VERSION" in fields:
                 versions[fields["NAME"]] = fields["VERSION"]
     return versions
+
+
+def get_published_snapshots(limit: int = 10) -> list[dict[str, Any]]:
+    """The published snapshots, newest first, each with its provenance.
+
+    The releases are the history: they are immutable and every one carries the
+    core it was built against. Nothing is stored to keep this; it is read back
+    from what was published. Bounded because the list only exists to be shown.
+    """
+
+    repo = gh.get_snapshot_repo()
+    snapshots = []
+    for tag, published_at in gh.find_releases_with_dates(
+            repo, config.SNAPSHOT_PREFIX)[:limit]:
+        entry: dict[str, Any] = {"tag": tag, "published_at": published_at}
+        path = os.path.join(_cache_dir(), f"{tag}-provenance.json")
+        try:
+            if not os.path.exists(path):
+                release = gh.get_release(repo, tag, create=False)
+                assets = {a.filename: a for a in gh.get_assets(release)}
+                asset = assets.get("provenance.json")
+                if asset is None:
+                    snapshots.append(entry)
+                    continue
+                gh.download_asset(asset, path)
+            with open(path, "rb") as handle:
+                provenance = json.loads(handle.read())
+        except (gh.GitHubError, OSError, ValueError):
+            # A snapshot with unreadable provenance is still a snapshot; say
+            # what is known rather than dropping it from the history.
+            snapshots.append(entry)
+            continue
+        entry["core_snapshot"] = provenance.get("core_snapshot", "")
+        entry["packages_revision"] = provenance.get("packages_revision", "")
+        snapshots.append(entry)
+    return snapshots
 
 
 def get_published_versions() -> tuple[str, dict[str, dict[str, str]]]:

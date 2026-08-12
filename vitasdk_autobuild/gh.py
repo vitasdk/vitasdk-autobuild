@@ -272,6 +272,19 @@ def find_releases(repo: str, prefix: str) -> list[str]:
     return sorted(tags, reverse=True)
 
 
+def find_releases_with_dates(repo: str, prefix: str) -> list[tuple[str, str]]:
+    """(tag, publication date) of every matching release, newest first.
+
+    The listing already carries the date, so knowing when each snapshot was
+    published costs no extra request.
+    """
+
+    found = [(r["tag_name"], r.get("published_at") or r.get("created_at") or "")
+             for r in api_list(f"/repos/{repo}/releases")
+             if r["tag_name"].startswith(prefix) and not r.get("draft")]
+    return sorted(found, reverse=True)
+
+
 def get_assets(release: Release, include_incomplete: bool = False) -> list[Asset]:
     assets = []
     for raw in api_list(f"/repos/{release.repo}/releases/{release.id}/assets"):

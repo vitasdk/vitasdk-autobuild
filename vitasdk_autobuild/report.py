@@ -69,7 +69,10 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
                  worlds: Iterable[World] | None = None,
                  built_at: dict[str, float] | None = None,
                  downloads: dict[str, int] | None = None,
-                 generated_at: float | None = None) -> dict[str, Any]:
+                 generated_at: float | None = None,
+                 published_tag: str = "",
+                 snapshot_repo: str = "",
+                 published_snapshots: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The machine readable state, uploaded as status.json.
 
     This is the only thing the website reads, so it has to carry everything a
@@ -115,7 +118,12 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
         })
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
+        # Which snapshot the repository versions above were read from, and the
+        # ones before it. Without the tag, "in the repository" names a version
+        # but not the thing it is in.
+        "published_tag": published_tag,
+        "published_snapshots": published_snapshots or [],
         "generated_at": generated_at if generated_at is not None else time.time(),
         "worlds": [
             {
@@ -128,6 +136,9 @@ def build_status(packages: Iterable[Package], jobs: list[dict[str, str]],
             for world in configured
         ],
         "packages_repo": config.PACKAGES_REPO,
+        # Where the snapshots live, which is not where the recipes live: the
+        # catalogue needs it to link a published release.
+        "snapshot_repo": snapshot_repo,
         "packages_revision": packages_revision,
         "jobs": jobs,
         "packages": entries,
