@@ -1,0 +1,64 @@
+name: build
+
+# The supervisor. It works out what is missing, dispatches generic workers,
+# and keeps the published status up to date while they run. It never builds
+# anything itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Show the plan without dispatching workers
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions: {}
+
+concurrency:
+  group: autobuild-supervisor
+  cancel-in-progress: false
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+
+  supervise:
+    needs: image
+    runs-on: ubuntu-24.04
+    # Long enough to follow a full rebuild of the catalogue.
+    timeout-minutes: 1440
+    permissions:
+      contents: write
+      actions: write
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Plan, dispatch and follow the build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          arguments=(supervise --target-branch build-branch)
+          if [[ $DRY_RUN == 'true' ]]; then
+            arguments+=(--dry-run)
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"
+
+      - name: Forget files no recipe asks for any more
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 -m vitasdk_autobuild clean-assets
+
+      - name: Refresh the staging repository index
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 -m vitasdk_autobuild snapshot --staging

@@ -1,0 +1,46 @@
+name: snapshot
+
+# Cuts an immutable package repository out of the staging area. Only packages
+# that are finished and unblocked go in, so a snapshot is never a mixture of
+# a rebuild in progress.
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_blocked:
+        description: Also include packages held back by their dependents
+        type: boolean
+        default: false
+      buildscripts_revision:
+        description: Recorded in provenance.json
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build and publish the repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INCLUDE_BLOCKED: ${{ inputs.include_blocked }}
+          BUILDSCRIPTS_REVISION: ${{ inputs.buildscripts_revision }}
+        shell: bash
+        run: |
+          arguments=(snapshot --work-dir "$RUNNER_TEMP/repository")
+          arguments+=(--buildscripts-revision "$BUILDSCRIPTS_REVISION")
+          if [[ $INCLUDE_BLOCKED == 'true' ]]; then
+            arguments+=(--include-blocked)
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"

@@ -1,0 +1,70 @@
+name: update-recipes
+
+# Recipes that follow a git branch are pinned to the commit that is actually
+# being served, and the commit goes into the version. Noticing that upstream
+# moved is the scheduler's job; deciding to take it is the maintainer's, so
+# this opens a pull request and never pushes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Restrict to recipes matching this glob
+        type: string
+        default: ''
+  schedule:
+    - cron: '0 4 * * 1'
+
+permissions: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Pin the recipes that follow a branch
+        env:
+          ONLY: ${{ inputs.only }}
+        shell: bash
+        run: |
+          arguments=(update-recipes --write)
+          if [[ -n $ONLY ]]; then
+            arguments+=(--only "$ONLY")
+          fi
+          python3 -m vitasdk_autobuild "${arguments[@]}"
+
+      - name: Open a pull request against the recipes
+        env:
+          GH_TOKEN: ${{ secrets.RECIPES_TOKEN }}
+          PACKAGES_REPO: vitasdk/packages
+        shell: bash
+        run: |
+          cd "$VITASDK_AUTOBUILD_CACHE/packages"
+          if git diff --quiet; then
+            echo 'Every recipe is already pinned to the current commit.'
+            exit 0
+          fi
+          if [[ -z $GH_TOKEN ]]; then
+            echo '::error::RECIPES_TOKEN is required to open a pull request against the recipes'
+            git --no-pager diff --stat
+            exit 1
+          fi
+          branch="pin-recipes-$(date -u +%Y%m%d)"
+          git config user.name 'vitasdk-autobuild'
+          git config user.email 'vitasdk-autobuild@users.noreply.github.com'
+          git checkout -b "$branch"
+          git commit --all \
+            --message 'recipes: pin git sources to the commit being served' \
+            --message 'Every source that followed a branch now names a commit, and the commit is part of the version. Without it the published file name never changes, so pacman never offers the update and the autobuilder cannot tell a rebuild is needed.'
+          git push --quiet "https://x-access-token:${GH_TOKEN}@github.com/${PACKAGES_REPO}.git" "$branch"
+          gh pr create --repo "$PACKAGES_REPO" --head "$branch" \
+            --title 'Pin git sources to the commit being served' \
+            --body 'Opened automatically by vitasdk-autobuild.'

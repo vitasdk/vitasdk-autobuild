@@ -1,0 +1,83 @@
+name: image
+
+# The build image is the recipe repository's Dockerfile with a pinned core SDK
+# inside. It is tagged by both, so an existing tag is never rebuilt and a
+# changed input never reuses a stale image.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      tag:
+        description: Tag of the build image the workers must use
+        value: ${{ jobs.image.outputs.tag }}
+      image:
+        description: Full reference of the build image
+        value: ${{ jobs.image.outputs.image }}
+
+permissions: {}
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.identify.outputs.tag }}
+      image: ${{ steps.identify.outputs.image }}
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Identify the image
+        id: identify
+        shell: bash
+        run: |
+          tag=$(python3 -m vitasdk_autobuild image-tag)
+          core=$(python3 -c 'from vitasdk_autobuild import config; print(config.CORE_SNAPSHOT)')
+          image="ghcr.io/${GITHUB_REPOSITORY@L}/build:${tag}"
+          {
+            echo "tag=$tag"
+            echo "image=$image"
+            echo "core=$core"
+          } >> "$GITHUB_OUTPUT"
+          echo "Build image: $image (core $core)"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether it already exists
+        id: check
+        shell: bash
+        run: |
+          if docker manifest inspect '${{ steps.identify.outputs.image }}' >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+            echo 'Image already published, nothing to build.'
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        if: steps.check.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.VITASDK_AUTOBUILD_CACHE }}/packages
+          push: true
+          tags: ${{ steps.identify.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            CORE_SNAPSHOT=${{ steps.identify.outputs.core }}

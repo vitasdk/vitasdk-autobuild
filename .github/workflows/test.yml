@@ -1,0 +1,39 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run the tests
+        run: python3 -m unittest discover -t . -s tests -v
+
+      - name: Check that every module compiles
+        run: python3 -m compileall -q vitasdk_autobuild
+
+  srcinfo:
+    # The queue is computed by running vita-makepkg over the real recipes.
+    # This is the only test that needs both repositories.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Read every recipe in vitasdk/packages
+        env:
+          VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+          VITASDK_AUTOBUILD_SRCINFO_TEST: '1'
+        run: python3 -m unittest tests.test_srcinfo_integration -v

@@ -1,0 +1,57 @@
+name: build-jobs
+
+# The workers. They own no package: each one pulls from the same queue until
+# it is empty, so the number of jobs follows the depth of the queue and not
+# the size of the catalogue.
+#
+# Dispatched by the supervisor onto the build-branch, which is what keeps a
+# push to the default branch from changing a build that is already running.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build-plan:
+        description: JSON matrix produced by the supervisor
+        required: true
+        type: string
+        default: '[]'
+
+permissions: {}
+
+jobs:
+  build:
+    if: inputs.build-plan != '[]' && github.ref == 'refs/heads/build-branch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.build-plan) }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    concurrency:
+      group: autobuild-worker-${{ matrix.name }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: read
+    container:
+      image: ghcr.io/${{ github.repository }}/build:${{ matrix.image-tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      # Root, so that the build itself can be dropped to an unprivileged user:
+      # recipes are arbitrary code and must not be able to read the token this
+      # job holds.
+      options: --user 0:0
+    env:
+      VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Process the build queue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_CHECK_RUN_ID: ${{ job.check_run_id }}
+        run: python3 -m vitasdk_autobuild build ${{ matrix.build-args }}

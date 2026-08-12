@@ -1,0 +1,10 @@
+The build queue model, the package states including finished-but-blocked, the
+blocking propagation, the supervisor/worker split and the "already built means
+the asset exists" rule are adapted from msys2-autobuild:
+
+    https://github.com/msys2/msys2-autobuild
+    Copyright (c) msys2-autobuild contributors, MIT licensed
+
+No code was copied. The Windows build layer, the six build types and the
+dependency on a live web service to compute the queue have no counterpart
+here: metadata comes from vita-makepkg --printsrcinfo instead.
