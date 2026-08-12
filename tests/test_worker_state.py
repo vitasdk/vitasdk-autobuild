@@ -74,8 +74,10 @@ class TestRootlessPacman(unittest.TestCase):
     """The prefix belongs to the build user, so the client runs as it."""
 
     def test_pacman_is_dropped_to_the_build_user(self):
+        import subprocess as sp
+        ok = sp.CompletedProcess([], 0, "", "")
         with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: ["sudo", *c]) as drop:
-            with mock.patch("subprocess.run") as run:
+            with mock.patch("subprocess.run", return_value=ok) as run:
                 build.pacman("/opt/vitasdk", "--query")
         self.assertTrue(run.call_args[0][0][0] == "sudo")
         passed = drop.call_args[0][2]
@@ -83,13 +85,65 @@ class TestRootlessPacman(unittest.TestCase):
 
     def test_every_path_stays_inside_the_prefix(self):
         # The self contained prefix contract: nothing is written outside it.
+        import subprocess as sp
+        ok = sp.CompletedProcess([], 0, "", "")
         with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
-            with mock.patch("subprocess.run") as run:
+            with mock.patch("subprocess.run", return_value=ok) as run:
                 build.pacman("/opt/vitasdk", "--query")
         arguments = run.call_args[0][0]
         for flag in ("--root", "--dbpath", "--cachedir", "--logfile", "--config"):
             value = arguments[arguments.index(flag) + 1]
             self.assertTrue(value.startswith("/opt/vitasdk"), f"{flag} -> {value}")
+
+class TestPrefixOwnership(unittest.TestCase):
+    """makepkg reads and creates the package database to write .BUILDINFO."""
+
+    def test_the_state_tree_is_handed_to_the_build_user(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as sdk:
+            with mock.patch.object(build, "give_to_build_user") as handover:
+                build.prepare_prefix(sdk)
+            self.assertTrue(os.path.isdir(os.path.join(sdk, "var", "lib", "pacman")))
+            self.assertTrue(os.path.isdir(os.path.join(sdk, "var", "cache", "pacman", "pkg")))
+            handover.assert_called_once_with(os.path.join(sdk, "var"))
+
+    def test_a_package_without_dependencies_still_gets_the_tree(self):
+        # It needs the database as much as any other: nothing to install is
+        # not the same as nothing to prepare.
+        with mock.patch.object(build, "prepare_prefix") as prepare:
+            with mock.patch.object(build, "reset_dependencies"):
+                build.install_dependencies([], "/opt/vitasdk")
+        prepare.assert_called_once()
+
+
+class TestPacmanDiagnostics(unittest.TestCase):
+
+    def test_a_failure_prints_what_the_client_said(self):
+        import contextlib
+        import io
+        import subprocess as sp
+
+        completed = sp.CompletedProcess([], 1, "", "error: could not create database")
+        out = io.StringIO()
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
+            with mock.patch("subprocess.run", return_value=completed):
+                with contextlib.redirect_stdout(out):
+                    with self.assertRaises(sp.CalledProcessError):
+                        build.pacman("/opt/vitasdk", "--query")
+        self.assertIn("could not create database", out.getvalue())
+
+    def test_check_false_reports_without_raising(self):
+        import contextlib
+        import io
+        import subprocess as sp
+
+        completed = sp.CompletedProcess([], 1, "", "boom")
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
+            with mock.patch("subprocess.run", return_value=completed):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    result = build.pacman("/opt/vitasdk", "--query", check=False)
+        self.assertEqual(result.returncode, 1)
 
 
 if __name__ == "__main__":

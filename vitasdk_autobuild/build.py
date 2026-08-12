@@ -89,7 +89,15 @@ def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.Complete
         "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
         "--noscriptlet", "--noconfirm", "--noprogressbar", *arguments,
     ], os.environ, ["PATH", "HOME", "VITASDK"])
-    return subprocess.run(command, check=check, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        # Without this the client's own explanation is swallowed and the
+        # failure reads as a bare exit code.
+        print((result.stderr or result.stdout).strip(), flush=True)
+        if check:
+            raise subprocess.CalledProcessError(result.returncode, command,
+                                                result.stdout, result.stderr)
+    return result
 
 
 def installed_dependencies(sdk: str) -> list[str]:
@@ -118,13 +126,22 @@ def reset_dependencies(sdk: str) -> list[str]:
     return installed
 
 
-def install_dependencies(assets: list[Asset], sdk: str) -> None:
-    # The bootstrap archive ships no var/ tree: vdpm and vita-makepkg create
-    # it on demand, and a direct pacman call has to do the same or pacman
-    # refuses the paths it is handed.
+def prepare_prefix(sdk: str) -> None:
+    """Creates the state directories pacman needs, owned by the build user.
+
+    The bootstrap archive ships no var/ tree: vdpm and vita-makepkg create it
+    on demand. Creating it here as root would leave the package database
+    unwritable by the build user, and makepkg needs to read and create it to
+    generate .BUILDINFO.
+    """
+
     for relative in ("var/lib/pacman", "var/cache/pacman/pkg", "var/log"):
         os.makedirs(os.path.join(sdk, relative), exist_ok=True)
+    give_to_build_user(os.path.join(sdk, "var"))
 
+
+def install_dependencies(assets: list[Asset], sdk: str) -> None:
+    prepare_prefix(sdk)
     reset_dependencies(sdk)
     if not assets:
         return
