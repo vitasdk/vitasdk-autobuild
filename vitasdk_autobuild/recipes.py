@@ -155,6 +155,20 @@ class Update:
         return self.old_version != self.new_version
 
 
+def evaluated_sources(raw: list[Source], info: dict) -> dict[Source, Source]:
+    """Pairs each source in the recipe with its evaluated .SRCINFO entry.
+
+    makepkg writes the same array in the same order, with every shell
+    variable already resolved, so pairing them by position is exact.
+    """
+
+    entries = [s for s in find_sources("\n".join(info.get("source", [])))
+               if s.protocol == "git"]
+    if len(entries) != len(raw):
+        return {}
+    return dict(zip(raw, entries))
+
+
 def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
     """Works out what a recipe following a branch should say instead."""
 
@@ -164,6 +178,10 @@ def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
     name = info["pkgbase"]
     pkgver = info["pkgver"]
     git_sources = [s for s in find_sources(text) if s.protocol == "git"]
+    # The recipe text is what has to be edited, but a source can be assembled
+    # from shell variables, and only vita-makepkg knows what they hold. The
+    # .SRCINFO entries are the same array, already evaluated.
+    evaluated = evaluated_sources(git_sources, info)
     unpinned = [s for s in git_sources if not s.pinned]
 
     # A pinned recipe still claiming a live version is not building something
@@ -175,15 +193,16 @@ def plan_update(package_dir: str, info: dict, cache_dir: str) -> Update | None:
     pins: dict[str, str] = {}
     newest: tuple[int, str] = (0, "")
     for source in git_sources:
-        url = expand(source.url, name, pkgver)
+        actual = evaluated.get(source, source)
+        url = expand(actual.url, name, pkgver)
         if "$" in url:
             raise ValueError(f"{name}: cannot resolve source URL {source.url!r}")
-        if source.pinned:
-            if not source.fragment.startswith("#commit="):
+        if actual.pinned:
+            if not actual.fragment.startswith("#commit="):
                 raise ValueError(f"{name}: pinned to a tag, set the version by hand")
-            sha, count = count_commits(url, cache_dir, source.fragment.split("=", 1)[1])
+            sha, count = count_commits(url, cache_dir, actual.fragment.split("=", 1)[1])
         else:
-            sha, count = resolve(url, cache_dir, source_ref(source))
+            sha, count = resolve(url, cache_dir, source_ref(actual))
             pins[source.url] = sha
         if count > newest[0]:
             newest = (count, sha)

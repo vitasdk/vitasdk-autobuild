@@ -224,6 +224,33 @@ class TestPinnedButLive(unittest.TestCase):
             info = {"pkgbase": "kubridge", "pkgver": "1.0"}
             self.assertIsNone(recipes.plan_update(directory, info, directory))
 
+class TestEvaluatedSources(unittest.TestCase):
+    """Sources built from shell variables are read from .SRCINFO, not guessed."""
+
+    def test_pairs_a_variable_pin_with_its_value(self):
+        raw = recipes.find_sources('source=("git+https://x/y.git#commit=${gitrev}")')
+        info = {"source": ["git+https://x/y.git#commit=" + "a" * 40]}
+        pairs = recipes.evaluated_sources(raw, info)
+        self.assertEqual(pairs[raw[0]].fragment, "#commit=" + "a" * 40)
+
+    def test_pairs_several_sources_by_position(self):
+        raw = recipes.find_sources(
+            'source=("git+https://a/1.git" "git+https://b/2.git#branch=dev")')
+        info = {"source": ["git+https://a/1.git", "git+https://b/2.git#branch=dev"]}
+        pairs = recipes.evaluated_sources(raw, info)
+        self.assertEqual(pairs[raw[1]].fragment, "#branch=dev")
+
+    def test_a_mismatch_falls_back_to_the_recipe_text(self):
+        raw = recipes.find_sources('source=("git+https://x/y.git")')
+        self.assertEqual(recipes.evaluated_sources(raw, {"source": []}), {})
+
+    def test_non_git_sources_are_ignored_on_both_sides(self):
+        raw = recipes.find_sources('source=("https://x/y.tar.gz" "git+https://x/y.git")')
+        info = {"source": ["https://x/y.tar.gz", "git+https://x/y.git#commit=" + "b" * 40]}
+        pairs = recipes.evaluated_sources(raw, info)
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(list(pairs.values())[0].fragment, "#commit=" + "b" * 40)
+
 
 if __name__ == "__main__":
     unittest.main()
