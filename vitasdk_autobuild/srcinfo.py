@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from . import config
-from .utils import run
+from .utils import as_build_user, give_to_build_user, run
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 SRCINFO_CONF = os.path.join(DATA_DIR, "srcinfo.conf")
@@ -32,6 +32,7 @@ def cache_dir() -> str:
         os.path.expanduser("~"), ".cache", "vitasdk-autobuild")
     path = os.path.join(root, "srcinfo")
     os.makedirs(path, exist_ok=True)
+    give_to_build_user(path)
     return path
 
 
@@ -124,9 +125,10 @@ def read(package_dir: str, makepkg: str) -> dict[str, Any]:
     # vita-makepkg refuses to start without an absolute VITASDK, but printing
     # metadata never touches it, so a placeholder is enough on a bare runner.
     environ.setdefault("VITASDK", "/nonexistent/vitasdk")
+    command = as_build_user(["bash", makepkg, "--nodeps", "--printsrcinfo"],
+                            environ, ["MAKEPKG_CONF", "VITASDK", "PATH", "HOME"])
     result = subprocess.run(
-        ["bash", makepkg, "--nodeps", "--printsrcinfo"],
-        cwd=package_dir, env=environ, capture_output=True, text=True)
+        command, cwd=package_dir, env=environ, capture_output=True, text=True)
     if result.returncode != 0:
         message = (result.stderr or result.stdout).strip().splitlines()
         raise SystemExit(

@@ -7,7 +7,6 @@ it with the recipe repository's own build script, and uploads the result.
 import fnmatch
 import json
 import os
-import pwd
 import shlex
 import shutil
 import subprocess
@@ -17,7 +16,7 @@ from typing import Iterable
 from . import config, gh, queue
 from .gh import Asset
 from .queue import Package
-from .utils import clean_environ, group
+from .utils import as_build_user, clean_environ, give_to_build_user, group
 
 
 class BuildError(Exception):
@@ -31,25 +30,6 @@ def get_packager() -> str:
     urls = gh.get_current_run_urls()
     reference = urls.get("job") or urls.get("build") or f"https://github.com/{repo}"
     return f"CI ({reference})"
-
-
-def get_build_user() -> str | None:
-    """The unprivileged user a build runs as, or None if we are not root.
-
-    Recipes are arbitrary code and the worker holds a token that can write to
-    the package store. Dropping to another user puts a kernel boundary between
-    the two: /proc/<pid>/environ of a different user is not readable.
-    """
-
-    if os.geteuid() != 0:
-        return None
-    for name in ("vita", "builder", "nobody"):
-        try:
-            pwd.getpwnam(name)
-        except KeyError:
-            continue
-        return name
-    return None
 
 
 def select_dependency_assets(package: Package, assets: Iterable[Asset]) -> list[Asset]:
@@ -135,19 +115,11 @@ def run_build(package: Package, packages_dir: str, output_dir: str,
     environ["SOURCE_DATE_EPOCH"] = source_date_epoch
     environ["PACKAGER"] = get_packager()
 
-    command = ["bash", script, package.repo_path, output_dir]
-    user = get_build_user()
-    if user is not None:
-        for path in (output_dir, os.path.join(packages_dir, package.repo_path)):
-            subprocess.run(["chown", "-R", user, path], check=True)
-        # env(1) rather than sudo's --preserve-env, because sudoers can reset
-        # PATH behind our back and vita-makepkg is found through it.
-        command = ["sudo", "-u", user, "--", "env",
-                   f"SOURCE_DATE_EPOCH={environ['SOURCE_DATE_EPOCH']}",
-                   f"PACKAGER={environ['PACKAGER']}",
-                   f"VITASDK={environ.get('VITASDK', '')}",
-                   f"PATH={environ.get('PATH', '')}",
-                   *command]
+    for path in (output_dir, os.path.join(packages_dir, package.repo_path)):
+        give_to_build_user(path)
+    command = as_build_user(
+        ["bash", script, package.repo_path, output_dir], environ,
+        ["SOURCE_DATE_EPOCH", "PACKAGER", "VITASDK", "PATH", "HOME"])
 
     print("$ " + shlex.join(command), flush=True)
     result = subprocess.run(command, cwd=packages_dir, env=environ)

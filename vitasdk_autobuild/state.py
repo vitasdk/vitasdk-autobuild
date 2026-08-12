@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from . import config, gh, queue, repodb
 from .queue import Package
-from .utils import run
+from .utils import give_to_build_user, run
 
 
 def cache_root() -> str:
@@ -38,6 +38,7 @@ def packages_checkout() -> str:
         run(["git", "-C", path, "fetch", "--depth", "1", "origin", branch])
         run(["git", "-C", path, "checkout", "--quiet", "--force", "FETCH_HEAD"])
         run(["git", "-C", path, "clean", "-xfdq"])
+    give_to_build_user(path)
     return path
 
 
