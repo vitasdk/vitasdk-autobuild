@@ -101,6 +101,18 @@ WORLDS: list[World] = [
         triple="arm-vita-eabi",
         description="gcc and newlib",
     ),
+    # The master branches as they stood in August 2026: newlib 4.1 and the
+    # headers without PR #886, which is what the homebrew out there is built
+    # against. Same host tools as the series above, so these two differ in
+    # exactly what defines a world.
+    World(
+        arch="vita",
+        core="sdk-core-2026.08.0",
+        repository="vita",
+        triple="arm-vita-eabi",
+        description="gcc and newlib",
+        series="2026.08",
+    ),
 ]
 
 # Which series a run drives. One run builds one series, because a series owns
