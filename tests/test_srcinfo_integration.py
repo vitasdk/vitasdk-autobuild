@@ -37,10 +37,15 @@ class TestRealRecipes(unittest.TestCase):
         self.assertTrue(any(package.ext_depends for package in self.packages))
 
     def test_every_package_has_a_usable_file_name(self):
+        # A file name belongs to a world, so it is asked for one world at a
+        # time and checked against that world's architecture rather than
+        # against the name the only world happened to have.
         for package in self.packages:
             with self.subTest(package=package.name):
-                for pattern in package.build_patterns():
-                    self.assertTrue(pattern.endswith("-vita.pkg.tar.*"), pattern)
+                for world in package.worlds:
+                    for pattern in package.build_patterns(world):
+                        self.assertTrue(
+                            pattern.endswith(f"-{world.arch}.pkg.tar.*"), pattern)
 
     def test_the_queue_has_no_cycles(self):
         queue.apply_status(self.packages, [], [])
