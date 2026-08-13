@@ -23,15 +23,6 @@ on:
         description: Branch in the recipe repository holding the proposal
         required: true
         type: string
-      world:
-        description: Which world, by architecture (empty means the first one)
-        type: string
-        default: ''
-      series:
-        description: Release series to build against (empty means the unnamed one)
-        required: false
-        type: string
-        default: ''
       status_sha:
         description: Commit in the recipe repository to report the result on
         type: string
@@ -56,13 +47,21 @@ jobs:
 
   try:
     needs: image
+    # Every configured world, because a recipe that builds in one series and
+    # not in another is exactly the breakage a proposal check is for. A series
+    # that is deprecated has no world configured, so it is not tried.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.image.outputs.matrix) }}
+    name: try (${{ matrix.world }})
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
       contents: read
       packages: read
     container:
-      image: ghcr.io/${{ github.repository }}/build:${{ needs.image.outputs.tag }}
+      image: ghcr.io/${{ github.repository }}/build:${{ matrix.tag }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -79,15 +78,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE: ${{ inputs.package || github.event.client_payload.package }}
-          WORLD: ${{ inputs.world || github.event.client_payload.world }}
-          SERIES: ${{ inputs.series || github.event.client_payload.series }}
+          WORLD: ${{ matrix.arch }}
+          SERIES: ${{ matrix.series }}
         shell: bash
         run: |
-          arguments=(try-build --package "$PACKAGE" --output-dir "$RUNNER_TEMP/built")
-          if [[ -n $WORLD ]]; then
-            arguments+=(--world "$WORLD")
-          fi
-          python3 -m vitasdk_autobuild --series "$SERIES" "${arguments[@]}"
+          python3 -m vitasdk_autobuild --series "$SERIES" try-build \
+            --package "$PACKAGE" --world "$WORLD" \
+            --output-dir "$RUNNER_TEMP/built"
 
       # So the package can be installed and tried before the proposal is
       # taken, which is what msys2 does with a pull request's build.
@@ -95,7 +92,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.package || github.event.client_payload.package }}
+          name: ${{ inputs.package || github.event.client_payload.package }}-${{ matrix.world }}
           path: ${{ runner.temp }}/built/*.pkg.tar.*
           if-no-files-found: ignore
 

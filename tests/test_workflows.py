@@ -366,6 +366,15 @@ class TestTryBuildWorkflow(unittest.TestCase):
         self.assertIn("always()", report["if"])
         self.assertIn("needs.try.result", str(report))
 
+    def test_it_tries_every_world_a_recipe_would_be_built_for(self):
+        # A recipe that builds in one series and not in another is the
+        # breakage this check exists to catch, and it only shows up if the
+        # proposal is tried in both.
+        document = load(os.path.join(WORKFLOW_DIR, "try-build.yml"))
+        self.assertEqual(document["jobs"]["try"]["strategy"]["matrix"]["include"],
+                         "${{ fromJSON(needs.image.outputs.matrix) }}")
+        self.assertIs(document["jobs"]["try"]["strategy"]["fail-fast"], False)
+
     def test_the_command_it_runs_exists(self):
         from vitasdk_autobuild import main
         parser = main.build_parser()

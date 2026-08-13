@@ -64,8 +64,8 @@ jobs:
 
           tags = dict(line.split() for line in open(sys.argv[1]) if line.strip())
           worlds = {world.name: world for world in config.WORLDS}
-          matrix = [{"arch": worlds[name].arch, "tag": tag,
-                     "core": worlds[name].core}
+          matrix = [{"world": name, "arch": worlds[name].arch, "tag": tag,
+                     "series": worlds[name].series, "core": worlds[name].core}
                     for name, tag in tags.items()]
           print("tags=" + json.dumps(tags))
           print("matrix=" + json.dumps(matrix))

@@ -215,7 +215,10 @@ def cmd_try_build(args: Any) -> None:
         raise SystemExit(f"ERROR: no recipe named {args.package}")
     package = wanted[0]
     if not package.builds_for(world):
-        raise SystemExit(f"ERROR: {package.name} does not build for {world.arch}")
+        # Not a failure of the proposal: a recipe is tried everywhere it would
+        # be built, and declaring that it is not built somewhere is an answer.
+        notice(f"{package.name} is not built for {world.name}, nothing to try")
+        return
 
     print(f"Trying {package.name} {package.version} for {world.arch} "
           f"against {world.core}", flush=True)
