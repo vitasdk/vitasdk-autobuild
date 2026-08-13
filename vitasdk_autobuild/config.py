@@ -39,6 +39,15 @@ class World:
 
     description: str = ""
 
+    series: str = ""
+    """The release series these packages belong to, empty for the unnamed one.
+
+    A series is a core that stays put while its packages keep improving, so
+    two of them are two package sets that must never mix. They cannot be told
+    apart by file name, because a package is named after its architecture and
+    that is the same in every series, so the series names the store instead.
+    """
+
     @property
     def prefix(self) -> str:
         return self.triple or self.arch
@@ -48,10 +57,22 @@ class World:
         return f"{self.repository}-staging"
 
     @property
+    def name(self) -> str:
+        """What identifies this world among all of them."""
+
+        return f"{self.series}/{self.arch}" if self.series else self.arch
+
+    @property
     def core_marker(self) -> str:
         """Asset recording which core this world's staged packages come from."""
 
         return f"core-{self.arch}.txt"
+
+
+def series_suffix(series: str) -> str:
+    """What a series adds to the name of everything it stores."""
+
+    return f"-{series}" if series else ""
 
 # The recipe repository. It is read, never written: adding a library must not
 # require touching the scheduler, and changing the scheduler must not need
@@ -82,13 +103,19 @@ WORLDS: list[World] = [
     ),
 ]
 
+# Which series a run drives. One run builds one series, because a series owns
+# its whole store; the arch axis inside it works as it always has. Left as a
+# runtime choice, like --world, while the set of series stays a commit.
+ACTIVE_SERIES = ""
+
 # Rebuild a package when something it links against was rebuilt after it.
 # Vita packages are mostly static libraries, so a dependent built against an
 # older dependency carries the old code until it is built again.
 REBUILD_DEPENDENTS = True
 
 # Releases used as the artifact store. They live in the autobuild repository,
-# so recipe contributors never need write access to them.
+# so recipe contributors never need write access to them. A named series gets
+# a store of its own, because two series produce the same file names.
 STAGING_RELEASE = "staging"
 FAILED_RELEASE = "staging-failed"
 STATUS_RELEASE = "status"
@@ -172,19 +199,65 @@ def apply_overrides(overrides: dict[str, Any]) -> None:
         globals()[key] = value
 
 
+def all_series() -> list[str]:
+    """Every series with a world configured, in the order they are declared."""
+
+    seen: list[str] = []
+    for world in WORLDS:
+        if world.series not in seen:
+            seen.append(world.series)
+    return seen
+
+
 def worlds() -> list[World]:
-    return list(WORLDS)
+    """The worlds of the series this run drives, and only those.
+
+    Everything downstream — the queue, the plan, the staging area it reads —
+    belongs to one series, so this is where the other ones stop existing.
+    """
+
+    return [world for world in WORLDS if world.series == ACTIVE_SERIES]
+
+
+def select_series(series: str) -> None:
+    """Points the run at a series, refusing one that has no world."""
+
+    if series and series not in all_series():
+        known = ", ".join(s or "(default)" for s in all_series()) or "none"
+        raise SystemExit(f"ERROR: unknown series {series!r}; configured: {known}")
+    apply_overrides({"ACTIVE_SERIES": series})
+
+
+def staging_release_tag() -> str:
+    return STAGING_RELEASE + series_suffix(ACTIVE_SERIES)
+
+
+def failed_release_tag() -> str:
+    return FAILED_RELEASE + series_suffix(ACTIVE_SERIES)
+
+
+def status_release_tag() -> str:
+    return STATUS_RELEASE + series_suffix(ACTIVE_SERIES)
+
+
+def snapshot_prefix() -> str:
+    """Snapshots of two series must not answer to the same tag search."""
+
+    if not ACTIVE_SERIES:
+        return SNAPSHOT_PREFIX
+    return f"packages-{ACTIVE_SERIES}-snapshot-"
 
 
 def default_world() -> World:
-    if not WORLDS:
+    configured = worlds()
+    if not configured:
         raise SystemExit("ERROR: no worlds configured")
-    return WORLDS[0]
+    return configured[0]
 
 
 def world_by_arch(arch: str) -> World:
-    for world in WORLDS:
+    for world in worlds():
         if world.arch == arch:
             return world
-    known = ", ".join(w.arch for w in WORLDS) or "none"
+    known = ", ".join(w.arch for w in worlds()) or "none"
     raise SystemExit(f"ERROR: unknown world {arch!r}; configured: {known}")

@@ -50,7 +50,7 @@ def get_published_snapshots(limit: int = 10) -> list[dict[str, Any]]:
     repo = gh.get_snapshot_repo()
     snapshots = []
     for tag, published_at in gh.find_releases_with_dates(
-            repo, config.SNAPSHOT_PREFIX)[:limit]:
+            repo, config.snapshot_prefix())[:limit]:
         entry: dict[str, Any] = {"tag": tag, "published_at": published_at}
         path = os.path.join(_cache_dir(), f"{tag}-provenance.json")
         try:
@@ -84,7 +84,7 @@ def get_published_versions() -> tuple[str, dict[str, dict[str, str]]]:
     """
 
     repo = gh.get_snapshot_repo()
-    tags = gh.find_releases(repo, config.SNAPSHOT_PREFIX)
+    tags = gh.find_releases(repo, config.snapshot_prefix())
     if not tags:
         return "", {}
     tag = tags[0]

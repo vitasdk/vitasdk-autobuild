@@ -54,4 +54,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JOB_CHECK_RUN_ID: ${{ job.check_run_id }}
-        run: python3 -m vitasdk_autobuild build ${{ matrix.build-args }}
+        run: python3 -m vitasdk_autobuild ${{ matrix.series-args }} build ${{ matrix.build-args }}

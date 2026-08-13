@@ -54,7 +54,8 @@ jobs:
         id: identify
         shell: bash
         run: |
-          # image-tag prints "<arch> <tag>", one line per world.
+          # image-tag prints "<world> <tag>", one line per world, across every
+          # series: a series cannot build until its own image exists.
           python3 -m vitasdk_autobuild image-tag > "$RUNNER_TEMP/tags"
           cat "$RUNNER_TEMP/tags"
           python3 - "$RUNNER_TEMP/tags" >> "$GITHUB_OUTPUT" <<'PYTHON'
@@ -62,9 +63,10 @@ jobs:
           from vitasdk_autobuild import config
 
           tags = dict(line.split() for line in open(sys.argv[1]) if line.strip())
-          cores = {world.arch: world.core for world in config.worlds()}
-          matrix = [{"arch": arch, "tag": tag, "core": cores[arch]}
-                    for arch, tag in tags.items()]
+          worlds = {world.name: world for world in config.WORLDS}
+          matrix = [{"arch": worlds[name].arch, "tag": tag,
+                     "core": worlds[name].core}
+                    for name, tag in tags.items()]
           print("tags=" + json.dumps(tags))
           print("matrix=" + json.dumps(matrix))
           print("tag=" + matrix[0]["tag"])

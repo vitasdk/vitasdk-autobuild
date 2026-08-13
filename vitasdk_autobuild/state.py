@@ -50,15 +50,18 @@ def packages_revision(path: str) -> str:
 
 
 def staging_release(create: bool = True) -> gh.Release:
-    return gh.get_release(gh.get_autobuild_repo(), config.STAGING_RELEASE, create=create)
+    return gh.get_release(gh.get_autobuild_repo(), config.staging_release_tag(),
+                          create=create)
 
 
 def failed_release(create: bool = True) -> gh.Release:
-    return gh.get_release(gh.get_autobuild_repo(), config.FAILED_RELEASE, create=create)
+    return gh.get_release(gh.get_autobuild_repo(), config.failed_release_tag(),
+                          create=create)
 
 
 def status_release(create: bool = True) -> gh.Release:
-    return gh.get_release(gh.get_autobuild_repo(), config.STATUS_RELEASE, create=create)
+    return gh.get_release(gh.get_autobuild_repo(), config.status_release_tag(),
+                          create=create)
 
 
 def assets_of(release_getter, create: bool) -> list[gh.Asset]:

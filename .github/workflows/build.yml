@@ -63,9 +63,32 @@ jobs:
       - name: Exercise the worker path against the real SDK
         run: python3 -m unittest tests.test_container -v
 
+  # Which series exist is configuration, so it is read from there rather than
+  # repeated here: a series added in a commit is supervised by the next run.
+  series:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      names: ${{ steps.read.outputs.names }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: read
+        run: echo "names=$(python3 -m vitasdk_autobuild list-series)" >> "$GITHUB_OUTPUT"
+
   supervise:
     if: ${{ github.ref == 'refs/heads/main' }}
-    needs: [image, smoke]
+    needs: [image, smoke, series]
+    # One run drives one series: each owns its staging area, its snapshot and
+    # its status, so they can be planned at the same time without meeting.
+    strategy:
+      fail-fast: false
+      matrix:
+        series: ${{ fromJSON(needs.series.outputs.names) }}
     runs-on: ubuntu-24.04
     # Long enough to follow a full rebuild of the catalogue.
     timeout-minutes: 1440
@@ -85,9 +108,10 @@ jobs:
           CHANNEL_TOKEN: ${{ secrets.CHANNEL_TOKEN }}
           WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
+          SERIES: ${{ matrix.series }}
         shell: bash
         run: |
-          arguments=(supervise --target-branch build-branch)
+          arguments=(--series "$SERIES" supervise --target-branch build-branch)
           if [[ $DRY_RUN == 'true' ]]; then
             arguments+=(--dry-run)
           fi
@@ -98,11 +122,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
-        run: python3 -m vitasdk_autobuild clean-assets
+          SERIES: ${{ matrix.series }}
+        run: python3 -m vitasdk_autobuild --series "$SERIES" clean-assets
 
       - name: Refresh the staging repository index
         if: ${{ !inputs.dry_run }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WEBSITE_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
-        run: python3 -m vitasdk_autobuild snapshot --staging
+          SERIES: ${{ matrix.series }}
+        run: python3 -m vitasdk_autobuild --series "$SERIES" snapshot --staging

@@ -175,6 +175,12 @@ class TestWorkerWorkflow(unittest.TestCase):
     def test_the_image_comes_from_the_plan(self):
         self.assertIn("${{ matrix.image-tag }}", self.job["container"]["image"])
 
+    def test_the_series_reaches_the_worker_before_its_subcommand(self):
+        # --series is a global option: after `build` it is not read at all,
+        # and the worker would quietly use the default series' staging area.
+        run = self.job["steps"][-1]["run"]
+        self.assertIn("${{ matrix.series-args }} build", run)
+
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestSupervisorWorkflow(unittest.TestCase):
@@ -201,6 +207,24 @@ class TestSupervisorWorkflow(unittest.TestCase):
         for name, job in self.document["jobs"].items():
             with self.subTest(job=name):
                 self.assertIn("refs/heads/main", job.get("if", ""))
+
+    def test_every_configured_series_is_supervised(self):
+        # Read from the configuration rather than listed here, so a series
+        # added in a commit is driven by the next scheduled run.
+        job = self.document["jobs"]["series"]
+        self.assertIn("list-series", job["steps"][-1]["run"])
+        self.assertEqual(self.document["jobs"]["supervise"]["strategy"]["matrix"]["series"],
+                         "${{ fromJSON(needs.series.outputs.names) }}")
+
+    def test_every_step_that_touches_the_store_says_which_series(self):
+        # A step that forgets it would read the default series' staging area
+        # while supervising another one.
+        for step in self.document["jobs"]["supervise"]["steps"]:
+            run = step.get("run", "")
+            if "vitasdk_autobuild" not in run:
+                continue
+            with self.subTest(step=step.get("name")):
+                self.assertIn("--series", run)
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestRecipeUpdateWorkflow(unittest.TestCase):

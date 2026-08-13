@@ -28,7 +28,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build the VitaSDK package catalogue from vitasdk/packages")
     parser.add_argument(
         "-o", "--set", action="append", default=[], metavar="KEY=VALUE",
-        help="override a configuration value, e.g. -o CORE_SNAPSHOT=sdk-snapshot-...")
+        help="override a configuration value, e.g. -o PACKAGES_BRANCH=next")
+    parser.add_argument(
+        "--series", default=None, metavar="NAME",
+        help="the release series this run drives; defaults to the unnamed one")
     parser.set_defaults(func=lambda args: parser.print_help())
     subparsers = parser.add_subparsers(title="commands")
 
@@ -55,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     tag = subparsers.add_parser(
         "image-tag", help="print the tag of the build image the workers need")
     tag.set_defaults(func=commands.cmd_image_tag)
+
+    series = subparsers.add_parser(
+        "list-series", help="print the configured release series as JSON")
+    series.set_defaults(func=commands.cmd_list_series)
 
     status = subparsers.add_parser("update-status", help="refresh status.json")
     status.set_defaults(func=commands.cmd_update_status)
@@ -117,6 +124,9 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     if args.set:
         config.apply_overrides(dict(parse_override(item) for item in args.set))
+    # After the overrides, so that a run can add a series and select it at once.
+    if args.series is not None:
+        config.select_series(args.series)
     args.func(args)
     return 0
 

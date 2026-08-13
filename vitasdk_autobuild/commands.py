@@ -41,9 +41,21 @@ def image_tags(packages_dir: str | None = None) -> dict[str, str]:
 
 
 def cmd_image_tag(args: Any) -> None:
+    """Every configured world, not just the running series'.
+
+    An image belongs to a world and its core, not to a store, and every series
+    needs its own before any worker of that series can start.
+    """
+
     packages_dir = state.packages_checkout()
-    for world in config.worlds():
-        print(f"{world.arch} {image_tag(world, packages_dir)}")
+    for world in config.WORLDS:
+        print(f"{world.name} {image_tag(world, packages_dir)}")
+
+
+def cmd_list_series(args: Any) -> None:
+    """The series a scheduled run has to drive, as a matrix."""
+
+    print(json.dumps(config.all_series()))
 
 
 def source_date_epoch(packages_dir: str) -> str:
@@ -435,7 +447,7 @@ def deprecations(packages: Any) -> dict[str, str]:
 
 def publish_snapshot(output_dir: str, package_count: int) -> str:
     repo = gh.get_current_repo()
-    tag = (config.SNAPSHOT_PREFIX + time.strftime("%Y%m%d", time.gmtime())
+    tag = (config.snapshot_prefix() + time.strftime("%Y%m%d", time.gmtime())
            + f".{os.environ.get('GITHUB_RUN_NUMBER', '0')}"
            + f".{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}")
 

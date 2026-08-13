@@ -307,9 +307,11 @@ class TestMachineReadableOutput(unittest.TestCase):
                     commands.cmd_image_tag(None)
 
         lines = out.getvalue().strip().splitlines()
-        self.assertEqual(len(lines), len(config.worlds()))
-        arch, tag = lines[0].split()
-        self.assertEqual(arch, WORLD.arch)
+        # Every configured world, not just the running series': a series
+        # cannot build until an image holding its own core exists.
+        self.assertEqual(len(lines), len(config.WORLDS))
+        name, tag = lines[0].split()
+        self.assertEqual(name, WORLD.name)
         self.assertTrue(tag.startswith(WORLD.core))
 
 class TestRepositoryGeneration(unittest.TestCase):

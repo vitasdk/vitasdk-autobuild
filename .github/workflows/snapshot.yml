@@ -15,6 +15,10 @@ on:
         description: Recorded in provenance.json
         type: string
         default: ''
+      series:
+        description: Release series to cut the snapshot from
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -37,9 +41,10 @@ jobs:
           CHANNEL_TOKEN: ${{ secrets.CHANNEL_TOKEN }}
           INCLUDE_BLOCKED: ${{ inputs.include_blocked }}
           BUILDSCRIPTS_REVISION: ${{ inputs.buildscripts_revision }}
+          SERIES: ${{ inputs.series }}
         shell: bash
         run: |
-          arguments=(snapshot --work-dir "$RUNNER_TEMP/repository")
+          arguments=(--series "$SERIES" snapshot --work-dir "$RUNNER_TEMP/repository")
           arguments+=(--buildscripts-revision "$BUILDSCRIPTS_REVISION")
           if [[ $INCLUDE_BLOCKED == 'true' ]]; then
             arguments+=(--include-blocked)

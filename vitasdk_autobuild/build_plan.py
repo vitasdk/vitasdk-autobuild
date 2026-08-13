@@ -52,9 +52,13 @@ def create_build_plan(packages: Iterable[Package], image_tags: dict[str, str],
             suffix = "" if index == 0 else f"-{index + 1}"
             position = START_POSITIONS[index % len(START_POSITIONS)]
             jobs.append({
-                "name": f"{world.arch}{suffix}",
+                "name": f"{world.name}{suffix}",
                 "runner": config.RUNNER_LABELS,
                 "image-tag": image_tags[world.arch],
+                # Ahead of the subcommand, because which series a run drives
+                # decides which store it reads before it does anything.
+                "series-args": (shlex.join(["--series", world.series])
+                                if world.series else ""),
                 "build-args": shlex.join(["--world", world.arch,
                                           "--build-from", position]),
             })
