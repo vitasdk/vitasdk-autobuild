@@ -105,6 +105,28 @@ class TestStatusFile(unittest.TestCase):
         self.assertEqual(status["published_tag"], "")
         self.assertEqual(status["published_snapshots"], [])
 
+    def test_a_deprecated_package_says_so(self):
+        # Deprecating is not removing: everything that depends on it keeps
+        # working, and the point is to say so before somebody starts
+        # something new on top of it.
+        old = make_package("cpython")
+        old.deprecated = "Python 2 is unsupported; use cpython3"
+        packages = queue_of(old)
+        apply_status(packages, [], [])
+        status = report.build_status(packages, [], "rev", [WORLD])
+        entry = {p["name"]: p for p in status["packages"]}
+        self.assertEqual(entry["cpython"]["deprecated"],
+                         "Python 2 is unsupported; use cpython3")
+        self.assertEqual(commands.deprecations(packages),
+                         {"cpython": "Python 2 is unsupported; use cpython3"})
+
+    def test_a_normal_package_carries_no_notice(self):
+        packages = queue_of(make_package("zlib"))
+        apply_status(packages, [], [])
+        status = report.build_status(packages, [], "rev", [WORLD])
+        self.assertEqual(status["packages"][0]["deprecated"], "")
+        self.assertEqual(commands.deprecations(packages), {})
+
     def test_status_is_json_serialisable(self):
         packages = queue_of(make_package("zlib"))
         apply_status(packages, [], [])

@@ -151,9 +151,16 @@ def collect(packages_dir: str) -> list[dict[str, Any]]:
 
     makepkg = find_vita_makepkg()
 
+    from . import recipes
+
     def read_one(name: str) -> dict[str, Any]:
-        info = read(os.path.join(packages_dir, name), makepkg)
+        directory = os.path.join(packages_dir, name)
+        info = read(directory, makepkg)
         info["repo_path"] = name
+        # makepkg only prints the fields it knows, so a declaration of its
+        # own has to be read from the recipe text.
+        with open(os.path.join(directory, "VITABUILD"), encoding="utf-8") as handle:
+            info["deprecated"] = recipes.declared_deprecation(handle.read())
         return info
 
     with ThreadPoolExecutor(8) as executor:

@@ -42,6 +42,9 @@ class Package:
         self.description: str = info.get("pkgdesc", "")
         self.url: str = info.get("url", "")
         self.licenses: list[str] = list(info.get("license", []))
+        # Declared by the recipe, not derived: a package nobody should start
+        # something new on top of, and why.
+        self.deprecated: str = info.get("deprecated", "")
         epoch = info.get("epoch", "")
         self.version: str = f"{info['pkgver']}-{info['pkgrel']}"
         if epoch:

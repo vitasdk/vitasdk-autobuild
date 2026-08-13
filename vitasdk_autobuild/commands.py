@@ -374,6 +374,14 @@ def cmd_snapshot(args: Any) -> None:
             os.replace(os.path.join(output_dir, entry), os.path.join(combined, entry))
     repository.write_provenance(combined, snapshot.packages_revision,
                                 args.buildscripts_revision)
+    # Travels with the snapshot so the channel manifest can carry it, and the
+    # client can say something at the moment somebody installs one of these.
+    obsolete = deprecations(snapshot.packages)
+    with open(os.path.join(combined, "deprecated.json"), "w", encoding="utf-8") as handle:
+        json.dump(obsolete, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    if obsolete:
+        notice(f"{len(obsolete)} deprecated package(s) recorded in the snapshot")
     if args.no_publish:
         return
     publish_snapshot(combined, total)
@@ -411,6 +419,18 @@ def request_channel_manifest(snapshot_tag: str) -> None:
         # The snapshot is published and immutable either way; the manifest can
         # be generated later without rebuilding anything.
         print(f"::warning::could not ask for a channel manifest: {e}", flush=True)
+
+
+def deprecations(packages: Any) -> dict[str, str]:
+    """The packages nobody should start something new on, and why.
+
+    Published with the snapshot so the channel can carry it: warning about
+    this at install time is the only moment anybody is listening.
+    """
+
+    return {package.name: package.deprecated
+            for package in sorted(packages, key=lambda p: p.name)
+            if package.deprecated}
 
 
 def publish_snapshot(output_dir: str, package_count: int) -> str:

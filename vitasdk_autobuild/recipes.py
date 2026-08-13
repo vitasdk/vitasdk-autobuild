@@ -37,6 +37,11 @@ LIVE_VERSIONS = ("9999", "99999999")
 
 FOLLOW_LINE = re.compile(r"^_follow=(.+)$", re.MULTILINE)
 
+# A package that should not be used any more, and why. Deprecation is a
+# decision by whoever maintains the recipe, so it is declared there rather
+# than inferred from anything.
+DEPRECATED_LINE = re.compile(r"^_deprecated=(.+)$", re.MULTILINE)
+
 
 @dataclass(frozen=True)
 class Source:
@@ -73,6 +78,20 @@ def declared_follow(text: str) -> list[str]:
         return [item.strip("'\"") for item in shlex.split(value[1:-1]) if item.strip("'\"")]
     value = value.strip("'\"")
     return [value] if value else []
+
+
+def declared_deprecation(text: str) -> str:
+    """Why a recipe says its package should no longer be used, if it does.
+
+    Removing a package is not the same as deprecating one: everything that
+    already depends on it keeps working, and the point is to say so before
+    somebody starts something new on top of it.
+    """
+
+    match = DEPRECATED_LINE.search(text)
+    if match is None:
+        return ""
+    return match.group(1).strip().strip("'\"")
 
 
 def follow_refs(text: str, git_sources: list["Source"]) -> dict["Source", str]:
