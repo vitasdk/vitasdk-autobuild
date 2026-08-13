@@ -191,11 +191,16 @@ class TestSupervisorWorkflow(unittest.TestCase):
     def test_only_one_supervisor_runs_at_a_time(self):
         self.assertEqual(self.document["concurrency"]["group"], "autobuild-supervisor")
 
-    def test_it_can_be_started_by_hand(self):
-        # The nightly schedule is commented out until a supervised run has
-        # been verified once; only the manual trigger is live.
-        self.assertIn("workflow_dispatch", triggers(self.document))
-        self.assertNotIn("schedule", triggers(self.document))
+    def test_it_runs_on_its_own_every_three_hours(self):
+        crons = [entry["cron"] for entry in triggers(self.document)["schedule"]]
+        self.assertEqual(crons, ["0 0/3 * * *"])
+
+    def test_no_job_supervises_from_another_branch(self):
+        # A schedule only fires from the default branch, but a copy of this
+        # file elsewhere must not be able to start a second supervisor.
+        for name, job in self.document["jobs"].items():
+            with self.subTest(job=name):
+                self.assertIn("refs/heads/main", job.get("if", ""))
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestRecipeUpdateWorkflow(unittest.TestCase):

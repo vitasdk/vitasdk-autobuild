@@ -207,11 +207,48 @@ def cmd_try_build(args: Any) -> None:
 
     print(f"Trying {package.name} {package.version} for {world.arch} "
           f"against {world.core}", flush=True)
+    output_dir = args.output_dir or tempfile.mkdtemp(prefix="vitasdk-try-")
     with group(f"[{world.arch}] {package.name} {package.version}"):
         produced = build.try_build(package, world, snapshot.packages_dir, sdk,
                                    source_date_epoch(snapshot.packages_dir),
-                                   snapshot.staging_assets)
+                                   snapshot.staging_assets, output_dir)
     notice(f"{package.name} {package.version} builds: " + ", ".join(produced))
+    report_contents(package, world, produced, output_dir, snapshot.staging_assets)
+
+
+def report_contents(package: Any, world: Any, produced: list[str], output_dir: str,
+                    assets: list[gh.Asset]) -> None:
+    """Says what the proposed build would change in the installed files.
+
+    Building is only half the question. A release that quietly stops shipping
+    a header still builds, and it is the packages that link against it that
+    break, later and somewhere else.
+    """
+
+    published = {asset.filename: asset for asset in assets}
+    for name in produced:
+        after = build.file_list(os.path.join(output_dir, name))
+        previous = next((published[f] for pattern in package.build_patterns(world)
+                         for f in sorted(fnmatch.filter(published, pattern))
+                         if f != name), None)
+        if previous is None:
+            with group(f"{name} installs {len(after)} path(s)"):
+                print("\n".join(after), flush=True)
+            continue
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, previous.filename)
+            gh.download_asset(previous, path)
+            before = build.file_list(path)
+        added, removed = build.compare_contents(before, after)
+        with group(f"{name} against {previous.filename}: "
+                   f"+{len(added)} -{len(removed)}"):
+            for path in added:
+                print(f"+ {path}", flush=True)
+            for path in removed:
+                print(f"- {path}", flush=True)
+        if removed:
+            print(f"::warning::{name} no longer installs {len(removed)} path(s) "
+                  f"that the published package does", flush=True)
 
 
 # ---------------------------------------------------------------- supervise

@@ -132,5 +132,25 @@ class TestEnvironmentIsolation(unittest.TestCase):
         self.assertEqual(sorted(cleaned), ["PATH", "VITASDK"])
 
 
+class TestContentComparison(unittest.TestCase):
+    """Building is half the question; what it installs is the other half."""
+
+    def test_it_names_what_appeared_and_what_went_missing(self):
+        before = ["usr/lib/libz.a", "usr/include/zlib.h", "usr/include/zconf.h"]
+        after = ["usr/lib/libz.a", "usr/include/zlib.h", "usr/lib/libz.so"]
+        added, removed = build.compare_contents(before, after)
+        self.assertEqual(added, ["usr/lib/libz.so"])
+        self.assertEqual(removed, ["usr/include/zconf.h"])
+
+    def test_an_identical_package_reports_nothing(self):
+        same = ["usr/lib/libz.a"]
+        self.assertEqual(build.compare_contents(same, list(same)), ([], []))
+
+    def test_order_does_not_matter(self):
+        added, removed = build.compare_contents(["b", "a"], ["a", "b"])
+        self.assertEqual((added, removed), ([], []))
+
+
+
 if __name__ == "__main__":
     unittest.main()

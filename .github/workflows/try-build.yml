@@ -77,11 +77,21 @@ jobs:
           WORLD: ${{ inputs.world || github.event.client_payload.world }}
         shell: bash
         run: |
-          arguments=(try-build --package "$PACKAGE")
+          arguments=(try-build --package "$PACKAGE" --output-dir "$RUNNER_TEMP/built")
           if [[ -n $WORLD ]]; then
             arguments+=(--world "$WORLD")
           fi
           python3 -m vitasdk_autobuild "${arguments[@]}"
+
+      # So the package can be installed and tried before the proposal is
+      # taken, which is what msys2 does with a pull request's build.
+      - name: Keep what it produced
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.package || github.event.client_payload.package }}
+          path: ${{ runner.temp }}/built/*.pkg.tar.*
+          if-no-files-found: ignore
 
   report:
     needs: try

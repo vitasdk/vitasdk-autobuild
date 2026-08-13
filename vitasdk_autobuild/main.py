@@ -95,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
         "try-build", help="build one package from a proposed recipe, uploading nothing")
     try_build.add_argument("--package", required=True, help="which recipe to try")
     try_build.add_argument("--world", default="", help="which world, by architecture")
+    try_build.add_argument("--output-dir", default="",
+                           help="keep the built files here, to publish as artifacts")
     try_build.set_defaults(func=commands.cmd_try_build)
 
     clean = subparsers.add_parser(

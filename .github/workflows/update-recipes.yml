@@ -47,6 +47,9 @@ concurrency:
 
 jobs:
   update:
+    # It writes to another repository, so it must not be startable from a
+    # branch that is not the one under review.
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

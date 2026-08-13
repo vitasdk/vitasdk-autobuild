@@ -11,10 +11,12 @@ on:
         description: Show the plan without dispatching workers
         type: boolean
         default: false
-  # Disabled until the first supervised run has been verified by hand.
-  # Re-enable together with the cron in update-recipes.yml.
-  # schedule:
-  #   - cron: '0 3 * * *'
+  # Every three hours rather than nightly, which is what msys2-autobuild
+  # does and for the same reason: the supervisor is incremental, so a pass
+  # with nothing to build costs a minute. Nightly would leave a whole day
+  # between merging a recipe change and anyone receiving the package.
+  schedule:
+    - cron: '0 0/3 * * *'
 
 permissions: {}
 
@@ -24,6 +26,10 @@ concurrency:
 
 jobs:
   image:
+    # Belt and braces: a schedule only ever runs from the default branch, but
+    # saying so in the job means a copy of this file on another branch cannot
+    # quietly start supervising too.
+    if: ${{ github.ref == 'refs/heads/main' }}
     uses: ./.github/workflows/image.yml
     # A called workflow cannot be granted more than the calling job holds, and
     # the top of this file grants nothing, so the permissions it needs to push
@@ -37,6 +43,7 @@ jobs:
   # exercises it in the image the workers will use, before six of them are sent
   # off to fail the same way at once.
   smoke:
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs: image
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -57,6 +64,7 @@ jobs:
         run: python3 -m unittest tests.test_container -v
 
   supervise:
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs: [image, smoke]
     runs-on: ubuntu-24.04
     # Long enough to follow a full rebuild of the catalogue.

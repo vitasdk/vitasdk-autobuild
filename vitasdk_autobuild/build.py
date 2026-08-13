@@ -245,8 +245,30 @@ def build_package(package: Package, world: World, packages_dir: str, sdk: str,
         shutil.rmtree(output_dir, ignore_errors=True)
 
 
+def file_list(path: str) -> list[str]:
+    """The paths a package file installs."""
+
+    listed = subprocess.run(["bsdtar", "--list", "--file", path],
+                            check=True, capture_output=True, text=True)
+    return sorted(line.strip() for line in listed.stdout.splitlines()
+                  if line.strip() and not line.startswith("."))
+
+
+def compare_contents(before: list[str], after: list[str]) -> tuple[list[str], list[str]]:
+    """What a proposed build adds and removes against the published package.
+
+    Whether it builds is only half the question: a release that quietly stops
+    installing a header still builds, and every dependent breaks later. This
+    is the same thing msys2 shows on a pull request as a file listing diff.
+    """
+
+    old, new = set(before), set(after)
+    return sorted(new - old), sorted(old - new)
+
+
 def try_build(package: Package, world: World, packages_dir: str, sdk: str,
-              source_date_epoch: str, assets: list[Asset]) -> list[str]:
+              source_date_epoch: str, assets: list[Asset],
+              output_dir: str | None = None) -> list[str]:
     """Builds one package and throws the result away.
 
     What a proposed recipe change needs answered is only "does this still
@@ -255,14 +277,17 @@ def try_build(package: Package, world: World, packages_dir: str, sdk: str,
     working from.
     """
 
-    output_dir = tempfile.mkdtemp(prefix="vitasdk-try-")
+    keep = output_dir is not None
+    output_dir = output_dir or tempfile.mkdtemp(prefix="vitasdk-try-")
+    os.makedirs(output_dir, exist_ok=True)
     try:
         install_dependencies(select_dependency_assets(package, world, assets), sdk)
         produced = run_build(package, world, packages_dir, output_dir,
                              source_date_epoch, sdk)
         return expected_outputs(package, world, produced)
     finally:
-        shutil.rmtree(output_dir, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(output_dir, ignore_errors=True)
 
 
 def report_failure(package: Package, world: World, failed: gh.Release) -> None:
