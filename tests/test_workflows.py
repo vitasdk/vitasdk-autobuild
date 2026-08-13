@@ -226,6 +226,53 @@ class TestSupervisorWorkflow(unittest.TestCase):
             with self.subTest(step=step.get("name")):
                 self.assertIn("--series", run)
 
+
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestNoWorkflowForgetsTheSeries(unittest.TestCase):
+    """The failure this guards against is silent and lands in the wrong store.
+
+    A command that reads or writes the staging area without being told which
+    series it is driving quietly uses the default one, so a worker builds for
+    2026.08 and files the result with the packages of the live series.
+    """
+
+    # Commands that read or write a series' store, or that decide which world
+    # a change lands on. The ones left out — image-tag, list-series,
+    # update-recipes — answer from the configuration or the recipes alone.
+    STORE_COMMANDS = ("show", "build", "supervise", "snapshot", "clean-assets",
+                      "clear-failed", "update-status", "try-build", "bump-core")
+
+    def invocations(self):
+        for path in workflow_files():
+            document = load(path)
+            for job_name, job in (document.get("jobs") or {}).items():
+                for step in job.get("steps") or []:
+                    run = step.get("run", "")
+                    if "vitasdk_autobuild" not in run:
+                        continue
+                    # Only where a command is actually named: right after the
+                    # module, or in the array a step builds up for it. Reading
+                    # the whole script would match the prose in a comment.
+                    named = " ".join(
+                        line for line in run.splitlines()
+                        if "vitasdk_autobuild" in line or "arguments=(" in line
+                        or "arguments+=(" in line).replace("vitasdk_autobuild", " ")
+                    if not any(re.search(rf"(?<![\w-]){command}(?![\w-])", named)
+                               for command in self.STORE_COMMANDS):
+                        continue
+                    yield os.path.basename(path), job_name, run
+
+    def test_there_are_invocations_to_check(self):
+        self.assertTrue(list(self.invocations()))
+
+    def test_each_one_says_which_series(self):
+        for workflow, job, run in self.invocations():
+            with self.subTest(workflow=workflow, job=job):
+                # A worker is handed its series by the plan rather than by an
+                # input, because the plan is what knows which one it is for.
+                self.assertTrue("--series" in run or "matrix.series-args" in run,
+                                run)
+
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestRecipeUpdateWorkflow(unittest.TestCase):
     """Editing someone else's recipes has to be inspectable before it happens."""

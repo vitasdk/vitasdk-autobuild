@@ -520,28 +520,43 @@ def have_git() -> bool:
     return shutil.which("git") is not None
 
 
-CORE_LINE = re.compile(
-    r'(?P<head>World\(\s*\n\s*arch="(?P<arch>[^"]+)",\s*\n\s*core=")(?P<core>[^"]*)(?P<tail>")')
+WORLD_BLOCK = re.compile(r"World\((?P<body>[^()]*)\)", re.S)
+CORE_FIELD = re.compile(r'(?P<head>core=")(?P<core>[^"]*)(?P<tail>")')
 
 
-def set_core(text: str, arch: str, core: str) -> str:
+def _world_field(body: str, name: str) -> str:
+    match = re.search(rf'{name}="(?P<value>[^"]*)"', body)
+    return match.group("value") if match else ""
+
+
+def set_core(text: str, name: str, core: str) -> str:
     """Points one world at a different core snapshot.
 
     The pin lives in configuration because changing it rebuilds that world's
     whole catalogue. Rewriting it is therefore a commit someone reviews, not
     something a notification does on its own.
+
+    The world is named by its series and its architecture together. Matching
+    on the architecture alone would move every series building it, which is
+    every series: a nightly core would land in a release that exists precisely
+    because its core does not move.
     """
 
     found = False
 
     def replace(match: "re.Match[str]") -> str:
         nonlocal found
-        if match.group("arch") != arch:
+        body = match.group("body")
+        arch = _world_field(body, "arch")
+        series = _world_field(body, "series")
+        if (f"{series}/{arch}" if series else arch) != name:
             return match.group(0)
         found = True
-        return match.group("head") + core + match.group("tail")
+        return "World(" + CORE_FIELD.sub(
+            lambda field: field.group("head") + core + field.group("tail"),
+            body, count=1) + ")"
 
-    updated = CORE_LINE.sub(replace, text)
+    updated = WORLD_BLOCK.sub(replace, text)
     if not found:
-        raise ValueError(f"no world with arch {arch!r} in the configuration")
+        raise ValueError(f"no world named {name!r} in the configuration")
     return updated

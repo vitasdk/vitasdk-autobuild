@@ -27,6 +27,10 @@ on:
         description: Show what would happen without doing it
         type: boolean
         default: false
+      series:
+        description: Release series to act on, empty for the unnamed one
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -50,6 +54,7 @@ jobs:
           ACTION: ${{ inputs.action }}
           PATTERN: ${{ inputs.pattern }}
           DRY_RUN: ${{ inputs.dry_run }}
+          SERIES: ${{ inputs.series }}
         shell: bash
         run: |
           case "$ACTION" in
@@ -80,4 +85,4 @@ jobs:
                 && $ACTION != 'update-status' ]]; then
             arguments+=(--dry-run)
           fi
-          python3 -m vitasdk_autobuild "${arguments[@]}"
+          python3 -m vitasdk_autobuild --series "$SERIES" "${arguments[@]}"

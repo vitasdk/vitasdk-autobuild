@@ -25,6 +25,10 @@ on:
         description: Which world, by architecture (empty means the first one)
         type: string
         default: ''
+      series:
+        description: Release series whose pin moves, empty for the unnamed one
+        type: string
+        default: ''
       dry_run:
         description: Write the change and stop, without pushing or rebuilding
         type: boolean
@@ -53,6 +57,7 @@ jobs:
         env:
           CORE: ${{ inputs.core || github.event.client_payload.core_snapshot }}
           WORLD: ${{ inputs.world || github.event.client_payload.world }}
+          SERIES: ${{ inputs.series || github.event.client_payload.series }}
         shell: bash
         run: |
           if [[ -z $CORE ]]; then
@@ -63,7 +68,7 @@ jobs:
           if [[ -n $WORLD ]]; then
             arguments+=(--world "$WORLD")
           fi
-          python3 -m vitasdk_autobuild "${arguments[@]}"
+          python3 -m vitasdk_autobuild --series "$SERIES" "${arguments[@]}"
           if git diff --quiet; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
             echo "::notice::already building against $CORE, nothing to do"

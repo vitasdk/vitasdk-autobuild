@@ -27,6 +27,11 @@ on:
         description: Which world, by architecture (empty means the first one)
         type: string
         default: ''
+      series:
+        description: Release series to build against (empty means the unnamed one)
+        required: false
+        type: string
+        default: ''
       status_sha:
         description: Commit in the recipe repository to report the result on
         type: string
@@ -75,13 +80,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE: ${{ inputs.package || github.event.client_payload.package }}
           WORLD: ${{ inputs.world || github.event.client_payload.world }}
+          SERIES: ${{ inputs.series || github.event.client_payload.series }}
         shell: bash
         run: |
           arguments=(try-build --package "$PACKAGE" --output-dir "$RUNNER_TEMP/built")
           if [[ -n $WORLD ]]; then
             arguments+=(--world "$WORLD")
           fi
-          python3 -m vitasdk_autobuild "${arguments[@]}"
+          python3 -m vitasdk_autobuild --series "$SERIES" "${arguments[@]}"
 
       # So the package can be installed and tried before the proposal is
       # taken, which is what msys2 does with a pull request's build.

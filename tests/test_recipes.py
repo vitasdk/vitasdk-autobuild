@@ -267,6 +267,25 @@ CONFIG = '''WORLDS: list[World] = [
 '''
 
 
+SERIES_CONFIG = '''WORLDS: list[World] = [
+    World(
+        arch="vita",
+        core="sdk-snapshot-20260812.565.1",
+        repository="vita",
+        triple="arm-vita-eabi",
+    ),
+    # A second series building the same architecture.
+    World(
+        arch="vita",
+        core="sdk-core-2026.08.0",
+        repository="vita",
+        triple="arm-vita-eabi",
+        series="2026.08",
+    ),
+]
+'''
+
+
 class TestSetCore(unittest.TestCase):
     """Repointing a world at a newer core, as a reviewable text change."""
 
@@ -289,13 +308,30 @@ class TestSetCore(unittest.TestCase):
         with self.assertRaises(ValueError):
             recipes.set_core(CONFIG, "vita-llvm", "whatever")
 
+    def test_a_series_keeps_its_core_when_another_one_moves(self):
+        # Two series build the same architecture, so naming a world by that
+        # alone would hand a nightly core to a release that exists precisely
+        # because its core does not move.
+        updated = recipes.set_core(SERIES_CONFIG, "vita", "sdk-snapshot-new")
+        self.assertIn('core="sdk-snapshot-new"', updated)
+        self.assertIn('core="sdk-core-2026.08.0"', updated)
+
+    def test_a_series_is_bumped_by_its_own_name(self):
+        updated = recipes.set_core(SERIES_CONFIG, "2026.08/vita", "sdk-core-2026.08.1")
+        self.assertIn('core="sdk-core-2026.08.1"', updated)
+        self.assertIn('core="sdk-snapshot-20260812.565.1"', updated)
+
+    def test_the_architecture_alone_no_longer_names_a_series_world(self):
+        with self.assertRaises(ValueError):
+            recipes.set_core(SERIES_CONFIG, "2026.08", "whatever")
+
     def test_the_real_configuration_can_be_rewritten(self):
         # The regex has to match the file as it is actually written, not a
         # sample that happens to look like it.
         import pathlib
         from vitasdk_autobuild import config
         text = pathlib.Path(config.__file__).read_text()
-        updated = recipes.set_core(text, config.default_world().arch, "sdk-snapshot-test")
+        updated = recipes.set_core(text, config.default_world().name, "sdk-snapshot-test")
         self.assertIn('core="sdk-snapshot-test"', updated)
 
 

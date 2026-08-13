@@ -517,11 +517,11 @@ def cmd_bump_core(args: Any) -> None:
         original = handle.read()
 
     if world.core == args.core:
-        notice(f"{world.arch} is already pinned to {args.core}")
+        notice(f"{world.name} is already pinned to {args.core}")
         return
 
     try:
-        updated = recipes.set_core(original, world.arch, args.core)
+        updated = recipes.set_core(original, world.name, args.core)
     except ValueError as e:
         raise SystemExit(f"ERROR: {e}")
 
