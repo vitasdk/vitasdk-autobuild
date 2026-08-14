@@ -13,10 +13,6 @@ from . import config
 from .config import World
 from .queue import Package, PackageStatus
 
-# Each worker walks the queue from a different end so that two of them are
-# unlikely to pick the same package at the same moment.
-START_POSITIONS = ["start", "end", "middle"]
-
 # Packages per worker. Low enough that a handful of queued packages still get
 # some parallelism, high enough that a full rebuild does not ask for more
 # runners than the queue can keep busy.
@@ -50,7 +46,6 @@ def create_build_plan(packages: Iterable[Package], image_tags: dict[str, str],
             # The world is part of the name so two worlds never share a
             # concurrency group and the logs say which is which.
             suffix = "" if index == 0 else f"-{index + 1}"
-            position = START_POSITIONS[index % len(START_POSITIONS)]
             jobs.append({
                 "name": f"{world.name}{suffix}",
                 "runner": config.RUNNER_LABELS,
@@ -59,7 +54,10 @@ def create_build_plan(packages: Iterable[Package], image_tags: dict[str, str],
                 # decides which store it reads before it does anything.
                 "series-args": (shlex.join(["--series", world.series])
                                 if world.series else ""),
+                # A worker is told its own index and how many were dispatched,
+                # which is what lets it enter the queue where no other one does.
                 "build-args": shlex.join(["--world", world.arch,
-                                          "--build-from", position]),
+                                          "--worker", str(index),
+                                          "--workers", str(count)]),
             })
     return jobs[:config.MAXIMUM_JOB_COUNT]

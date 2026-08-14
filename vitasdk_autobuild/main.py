@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build the VitaSDK package catalogue from vitasdk/packages")
     parser.add_argument(
         "-o", "--set", action="append", default=[], metavar="KEY=VALUE",
-        help="override a configuration value, e.g. -o PACKAGES_BRANCH=next")
+        help="override a configuration value, e.g. -o PACKAGES_BRANCH=master")
     parser.add_argument(
         "--series", default=None, metavar="NAME",
         help="the release series this run drives; defaults to the unnamed one")
@@ -41,8 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser(
         "build", help="build packages from the queue until it is empty")
     worker.add_argument("--world", help="which world to build for, by architecture")
-    worker.add_argument("--build-from", choices=["start", "middle", "end"], default="start",
-                        help="which end of the queue this worker starts from")
+    worker.add_argument("--worker", type=int, default=0,
+                        help="index of this worker among the ones dispatched")
+    worker.add_argument("--workers", type=int, default=1,
+                        help="how many workers are pulling from the same queue")
     worker.set_defaults(func=commands.cmd_build)
 
     supervise = subparsers.add_parser(

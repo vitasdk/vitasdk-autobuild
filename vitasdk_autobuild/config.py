@@ -78,7 +78,7 @@ def series_suffix(series: str) -> str:
 # require touching the scheduler, and changing the scheduler must not need
 # library-maintainer review.
 PACKAGES_REPO = "vitasdk/packages"
-PACKAGES_BRANCH = "next"
+PACKAGES_BRANCH = "master"
 
 # vita-makepkg is needed outside of the SDK to compute .SRCINFO for the build
 # queue. It ships inside the SDK, so this pin exists only for the supervisor,

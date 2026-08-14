@@ -137,13 +137,15 @@ def cmd_update_status(args: Any) -> None:
 
 # ---------------------------------------------------------------- build
 
-def pick_package(packages: list[Package], world: World, build_from: str,
+def pick_package(packages: list[Package], world: World, worker: int, workers: int,
                  skip: set[tuple[str, str]]) -> Package | None:
-    """Next package to build, approached from one end of the queue.
+    """Next package to build, entering the queue where this worker belongs.
 
-    Workers do not coordinate. Starting from different ends is what keeps two
-    of them from picking the same package at the same moment; picking the same
-    one anyway is wasteful but harmless.
+    Workers do not coordinate, so what keeps two of them off the same package
+    is where each one enters the queue. Dividing it by how many were dispatched
+    gives every worker its own entry point; naming a fixed set of them instead
+    means the ones past the end of that set duplicate the ones at the start,
+    and the loser of the race only finds out when it tries to upload.
     """
 
     ready = [p for p in packages
@@ -152,11 +154,7 @@ def pick_package(packages: list[Package], world: World, build_from: str,
              and (p.name, p.version) not in skip]
     if not ready:
         return None
-    if build_from == "end":
-        return ready[-1]
-    if build_from == "middle":
-        return ready[len(ready) // 2]
-    return ready[0]
+    return ready[worker * len(ready) // workers]
 
 
 def cmd_build(args: Any) -> None:
@@ -176,7 +174,7 @@ def cmd_build(args: Any) -> None:
             break
 
         snapshot = state.get_queue_with_status()
-        package = pick_package(snapshot.packages, world, args.build_from, skip)
+        package = pick_package(snapshot.packages, world, args.worker, args.workers, skip)
         if package is None:
             print("Nothing left to build", flush=True)
             break

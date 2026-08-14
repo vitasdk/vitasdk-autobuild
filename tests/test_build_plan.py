@@ -57,15 +57,17 @@ class TestBuildPlan(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(names[0], WORLD.arch)
 
-    def test_workers_start_from_different_ends(self):
+    def test_every_worker_is_told_its_index_and_how_many_there_are(self):
+        # Without the total, a worker cannot know which part of the queue is
+        # its own, and workers past the third would duplicate the first ones.
         packages = [make_package(f"p{i}") for i in range(60)]
         apply_status(packages, [], [])
         jobs = plan(packages)
-        positions = [job["build-args"] for job in jobs[:3]]
-        self.assertEqual(positions, [
-            "--world vita --build-from start",
-            "--world vita --build-from end",
-            "--world vita --build-from middle"])
+        count = len(jobs)
+        self.assertEqual(
+            [job["build-args"] for job in jobs],
+            [f"--world vita --worker {index} --workers {count}"
+             for index in range(count)])
 
     def test_image_tag_is_passed_to_every_worker(self):
         packages = [make_package("zlib")]

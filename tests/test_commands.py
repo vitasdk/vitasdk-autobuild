@@ -18,23 +18,30 @@ class TestPickPackage(unittest.TestCase):
         self.packages = [make_package(name) for name in ("a", "b", "c", "d", "e")]
         apply_status(self.packages, [], [])
 
-    def test_start_takes_the_first(self):
-        self.assertEqual(commands.pick_package(self.packages, WORLD, "start", set()).name, "a")
+    def test_a_lone_worker_takes_the_first(self):
+        self.assertEqual(commands.pick_package(self.packages, WORLD, 0, 1, set()).name, "a")
 
-    def test_end_takes_the_last(self):
-        self.assertEqual(commands.pick_package(self.packages, WORLD, "end", set()).name, "e")
+    def test_the_last_worker_starts_near_the_end(self):
+        self.assertEqual(commands.pick_package(self.packages, WORLD, 4, 5, set()).name, "e")
 
-    def test_middle_takes_the_middle(self):
-        self.assertEqual(commands.pick_package(self.packages, WORLD, "middle", set()).name, "c")
+    def test_every_worker_enters_the_queue_somewhere_else(self):
+        # The bug this replaces: six workers shared three entry points, so
+        # three pairs walked the same queue in the same order and every loser
+        # built a package that was already uploaded by the time it finished.
+        packages = [make_package(f"p{i}") for i in range(6)]
+        apply_status(packages, [], [])
+        picked = [commands.pick_package(packages, WORLD, worker, 6, set()).name
+                  for worker in range(6)]
+        self.assertEqual(len(set(picked)), 6)
 
     def test_skips_what_this_worker_already_tried(self):
         skip = {("a", "1.0-1")}
-        self.assertEqual(commands.pick_package(self.packages, WORLD, "start", skip).name, "b")
+        self.assertEqual(commands.pick_package(self.packages, WORLD, 0, 1, skip).name, "b")
 
     def test_returns_nothing_when_the_queue_is_empty(self):
         for package in self.packages:
             package.set_status(WORLD, PackageStatus.FINISHED)
-        self.assertIsNone(commands.pick_package(self.packages, WORLD, "start", set()))
+        self.assertIsNone(commands.pick_package(self.packages, WORLD, 0, 1, set()))
 
     def test_only_picks_packages_that_are_ready(self):
         zlib = make_package("zlib")
@@ -42,7 +49,7 @@ class TestPickPackage(unittest.TestCase):
         packages = queue_of(zlib, png)
         apply_status(packages, [], [])
         for _ in range(3):
-            self.assertEqual(commands.pick_package(packages, WORLD, "end", set()).name, "zlib")
+            self.assertEqual(commands.pick_package(packages, WORLD, 1, 2, set()).name, "zlib")
 
 
 class TestImageTag(unittest.TestCase):
