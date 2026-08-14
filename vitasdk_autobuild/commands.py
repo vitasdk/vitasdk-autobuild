@@ -18,6 +18,7 @@ from .queue import Package, PackageStatus
 from .utils import group, notice, sanitize_tag, trust_git_checkouts
 
 WORKER_WORKFLOW = "build-jobs.yml"
+SNAPSHOT_WORKFLOW = "snapshot.yml"
 
 
 def image_tag(world: World, packages_dir: str | None = None) -> str:
@@ -290,6 +291,17 @@ def drop_stale_dependents(snapshot: state.Snapshot, dry_run: bool) -> int:
     return dropped
 
 
+def queue_is_drained(packages: list[Package]) -> bool:
+    """Whether any world still has something a worker could pick up.
+
+    Packages held back by a dependent, or waiting on one that failed, are not
+    queued: nothing a worker does moves them, and waiting for them would mean
+    never publishing again after the first failure.
+    """
+
+    return not any(build_plan.queued_in(packages, world) for world in config.worlds())
+
+
 def cmd_supervise(args: Any) -> None:
     repo = gh.get_current_repo()
 
@@ -334,10 +346,20 @@ def cmd_supervise(args: Any) -> None:
     while True:
         time.sleep(args.poll_interval)
         run = gh.get_run(repo, run_id)
-        update_status(state.get_queue_with_status(full_details=True))
+        snapshot = state.get_queue_with_status(full_details=True)
+        update_status(snapshot)
         if run.get("status") == "completed":
             notice(f"Workers finished: {run.get('conclusion')}")
             break
+
+    # A round that emptied the queue is a round worth publishing. One that did
+    # not will be followed by another, and cutting a snapshot per round would
+    # name a catalogue that is still moving.
+    if not queue_is_drained(snapshot.packages):
+        notice("Packages are still queued: the next round picks them up")
+        return
+    gh.dispatch_workflow(repo, SNAPSHOT_WORKFLOW, args.target_branch, {})
+    notice("Queue drained: asked for a snapshot")
 
 
 # ---------------------------------------------------------------- repository

@@ -52,6 +52,30 @@ class TestPickPackage(unittest.TestCase):
             self.assertEqual(commands.pick_package(packages, WORLD, 1, 2, set()).name, "zlib")
 
 
+class TestQueueIsDrained(unittest.TestCase):
+    """What decides whether a round of builds ends in a published snapshot."""
+
+    def test_a_queue_with_something_left_is_not_drained(self):
+        packages = [make_package("a"), make_package("b")]
+        apply_status(packages, [], [])
+        self.assertFalse(commands.queue_is_drained(packages))
+
+    def test_everything_built_drains_the_queue(self):
+        packages = [make_package("a"), make_package("b")]
+        apply_status(packages, ["a-1.0-1-vita.pkg.tar.xz",
+                                "b-1.0-1-vita.pkg.tar.xz"], [])
+        self.assertTrue(commands.queue_is_drained(packages))
+
+    def test_a_failure_still_drains_the_queue(self):
+        # Its dependents can never be built, so waiting for them would mean
+        # never publishing again after the first failure.
+        zlib = make_package("zlib")
+        png = make_package("libpng", depends=["zlib"])
+        packages = queue_of(zlib, png)
+        apply_status(packages, [], ["zlib-1.0-1-vita.failed"])
+        self.assertTrue(commands.queue_is_drained(packages))
+
+
 class TestImageTag(unittest.TestCase):
 
     def test_tag_is_derived_from_the_world_core(self):
