@@ -31,14 +31,18 @@ def packages_checkout() -> str:
         return override
 
     path = os.path.join(cache_root(), "packages")
-    url = f"https://github.com/{config.PACKAGES_REPO}.git"
+    url = os.environ.get("PACKAGES_URL") or f"https://github.com/{config.PACKAGES_REPO}.git"
     branch = os.environ.get("PACKAGES_BRANCH") or config.PACKAGES_BRANCH
     if not os.path.exists(os.path.join(path, ".git")):
-        run(["git", "clone", "--depth", "1", "--branch", branch, url, path])
-    else:
-        run(["git", "-C", path, "fetch", "--depth", "1", "origin", branch])
-        run(["git", "-C", path, "checkout", "--quiet", "--force", "FETCH_HEAD"])
-        run(["git", "-C", path, "clean", "-xfdq"])
+        run(["git", "init", "--quiet", path])
+        run(["git", "-C", path, "remote", "add", "origin", url])
+    # refs/heads/, never the bare name: vitasdk/packages carries a tag called
+    # master left over from 2021, and both `clone --branch` and a bare fetch
+    # resolve that name to the tag. The recipes it holds are five years old and
+    # the builds against them fail in ways that read like recipe bugs.
+    run(["git", "-C", path, "fetch", "--depth", "1", "origin", f"refs/heads/{branch}"])
+    run(["git", "-C", path, "checkout", "--quiet", "--force", "FETCH_HEAD"])
+    run(["git", "-C", path, "clean", "-xfdq"])
     give_to_build_user(path)
     return path
 
