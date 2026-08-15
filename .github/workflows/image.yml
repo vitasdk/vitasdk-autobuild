@@ -46,7 +46,7 @@ jobs:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
       PACKAGES_BRANCH: ${{ inputs.packages_branch }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -88,7 +88,7 @@ jobs:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
       PACKAGES_BRANCH: ${{ inputs.packages_branch }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 

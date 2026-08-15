@@ -70,7 +70,7 @@ jobs:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
       PACKAGES_BRANCH: ${{ inputs.packages_branch || github.event.client_payload.packages_branch }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -90,7 +90,7 @@ jobs:
       # taken, which is what msys2 does with a pull request's build.
       - name: Keep what it produced
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.package || github.event.client_payload.package }}-${{ matrix.world }}
           path: ${{ runner.temp }}/built/*.pkg.tar.*
