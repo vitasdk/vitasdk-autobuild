@@ -430,10 +430,12 @@ def cmd_snapshot(args: Any) -> None:
         notice(f"{len(obsolete)} deprecated package(s) recorded in the snapshot")
     if args.no_publish:
         return
-    publish_snapshot(combined, total)
+    publish_snapshot(combined, total, config.ACTIVE_SERIES,
+                     config.default_world().arch, args.buildscripts_revision)
 
 
-def request_channel_manifest(snapshot_tag: str) -> None:
+def request_channel_manifest(snapshot_tag: str, series: str, world: str,
+                             buildscripts_revision: str) -> None:
     """Asks for a signed channel manifest naming this snapshot.
 
     The signing key lives in the repository that produces the manifest, so
@@ -453,18 +455,26 @@ def request_channel_manifest(snapshot_tag: str) -> None:
     # runs after a snapshot has been published and must not be able to fail
     # the command that published it.
     here = os.environ.get("GITHUB_REPOSITORY", "")
+    core = config.default_world().core
+    channel = series or "nightly"
     try:
         gh.dispatch_repository(config.CHANNEL_REPO, config.CHANNEL_EVENT, token, {
-            "core_snapshot": config.default_world().core,
+            "core_snapshot": core,
             "packages_snapshot": snapshot_tag,
             "packages_repository": here,
+            "channel": channel,
+            "world": world,
+            "buildscripts_sha": buildscripts_revision,
         })
         print(f"Asked {config.CHANNEL_REPO} for a channel manifest naming "
-              f"{snapshot_tag}", flush=True)
+              f"{snapshot_tag} on the {channel} channel", flush=True)
     except gh.GitHubError as e:
         # The snapshot is published and immutable either way; the manifest can
         # be generated later without rebuilding anything.
-        print(f"::warning::could not ask for a channel manifest: {e}", flush=True)
+        print(f"::warning::could not ask for a channel manifest: {e}. Regenerate it "
+              f"by hand by running channel.yml's workflow_dispatch in "
+              f"{config.CHANNEL_REPO} with core_release={core}, "
+              f"packages_release={snapshot_tag}, channel={channel}.", flush=True)
 
 
 def deprecations(packages: Any) -> dict[str, str]:
@@ -479,7 +489,8 @@ def deprecations(packages: Any) -> dict[str, str]:
             if package.deprecated}
 
 
-def publish_snapshot(output_dir: str, package_count: int) -> str:
+def publish_snapshot(output_dir: str, package_count: int, series: str, world: str,
+                     buildscripts_revision: str) -> str:
     repo = gh.get_current_repo()
     tag = (config.snapshot_prefix() + time.strftime("%Y%m%d", time.gmtime())
            + f".{os.environ.get('GITHUB_RUN_NUMBER', '0')}"
@@ -491,7 +502,7 @@ def publish_snapshot(output_dir: str, package_count: int) -> str:
         if os.path.isfile(path):
             gh.upload_asset(release, entry, path=path, replace=True)
     notice(f"Published {tag} with {package_count} package(s)")
-    request_channel_manifest(tag)
+    request_channel_manifest(tag, series, world, buildscripts_revision)
     return tag
 
 
