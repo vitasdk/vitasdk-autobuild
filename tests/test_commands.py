@@ -433,7 +433,8 @@ class TestChannelRequest(unittest.TestCase):
         environ = {k: v for k, v in os.environ.items() if k != "CHANNEL_TOKEN"}
         with mock.patch.dict(os.environ, environ, clear=True):
             with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
-                commands.request_channel_manifest("packages-snapshot-1")
+                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
+                                                  "vita", "buildscripts-sha")
         dispatch.assert_not_called()
 
     def test_the_request_names_the_snapshot_and_where_it_lives(self):
@@ -442,7 +443,8 @@ class TestChannelRequest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret",
                                           "GITHUB_REPOSITORY": "vitasdk/vitasdk-autobuild"}):
             with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
-                commands.request_channel_manifest("packages-snapshot-1")
+                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
+                                                  "vita", "buildscripts-sha")
         repo, event, token = dispatch.call_args[0][:3]
         payload = dispatch.call_args[0][3]
         self.assertEqual(repo, config.CHANNEL_REPO)
@@ -450,6 +452,18 @@ class TestChannelRequest(unittest.TestCase):
         self.assertEqual(payload["packages_snapshot"], "packages-snapshot-1")
         self.assertEqual(payload["packages_repository"], "vitasdk/vitasdk-autobuild")
         self.assertEqual(payload["core_snapshot"], config.default_world().core)
+        self.assertEqual(payload["channel"], "2026.08")
+        self.assertEqual(payload["world"], "vita")
+        self.assertEqual(payload["buildscripts_sha"], "buildscripts-sha")
+
+    def test_the_unnamed_series_asks_for_the_nightly_channel(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.request_channel_manifest("packages-snapshot-1", "", "vita", "")
+        payload = dispatch.call_args[0][3]
+        self.assertEqual(payload["channel"], "nightly")
 
     def test_a_failed_request_does_not_undo_a_published_snapshot(self):
         import os
@@ -458,7 +472,27 @@ class TestChannelRequest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
             with mock.patch.object(commands.gh, "dispatch_repository",
                                    side_effect=gh.GitHubError(404, "Not Found")):
-                commands.request_channel_manifest("packages-snapshot-1")
+                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
+                                                  "vita", "buildscripts-sha")
+
+    def test_a_failed_request_says_how_to_recover_by_hand(self):
+        import io
+        import contextlib
+        import os
+        from unittest import mock
+        from vitasdk_autobuild import gh
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository",
+                                   side_effect=gh.GitHubError(404, "Not Found")):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    commands.request_channel_manifest("packages-snapshot-1", "2026.08",
+                                                      "vita", "buildscripts-sha")
+        message = out.getvalue()
+        self.assertIn("::warning::", message)
+        self.assertIn("workflow_dispatch", message)
+        self.assertIn("packages-snapshot-1", message)
+        self.assertIn("2026.08", message)
 
 
 if __name__ == "__main__":
