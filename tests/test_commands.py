@@ -76,6 +76,22 @@ class TestQueueIsDrained(unittest.TestCase):
         self.assertTrue(commands.queue_is_drained(packages))
 
 
+class TestSnapshotDispatchInputs(unittest.TestCase):
+    """What a supervise round asks snapshot.yml to cut, once the queue drains."""
+
+    def test_the_driving_series_is_forwarded(self):
+        inputs = commands.snapshot_dispatch_inputs("2026.08")
+        self.assertEqual(inputs["series"], "2026.08")
+
+    def test_the_unnamed_series_is_forwarded_as_itself_not_dropped(self):
+        inputs = commands.snapshot_dispatch_inputs("")
+        self.assertEqual(inputs["series"], "")
+
+    def test_no_buildscripts_revision_is_invented(self):
+        inputs = commands.snapshot_dispatch_inputs("2026.08")
+        self.assertEqual(inputs["buildscripts_revision"], "")
+
+
 class TestImageTag(unittest.TestCase):
 
     def test_tag_is_derived_from_the_world_core(self):

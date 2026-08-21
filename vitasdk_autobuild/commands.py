@@ -302,6 +302,16 @@ def queue_is_drained(packages: list[Package]) -> bool:
     return not any(build_plan.queued_in(packages, world) for world in config.worlds())
 
 
+def snapshot_dispatch_inputs(series: str) -> dict[str, str]:
+    """Inputs for the snapshot.yml dispatch.
+
+    No buildscripts revision is tracked against a core pin, so that one stays
+    empty rather than guessed.
+    """
+
+    return {"series": series, "buildscripts_revision": ""}
+
+
 def cmd_supervise(args: Any) -> None:
     repo = gh.get_current_repo()
 
@@ -358,7 +368,8 @@ def cmd_supervise(args: Any) -> None:
     if not queue_is_drained(snapshot.packages):
         notice("Packages are still queued: the next round picks them up")
         return
-    gh.dispatch_workflow(repo, SNAPSHOT_WORKFLOW, args.target_branch, {})
+    gh.dispatch_workflow(repo, SNAPSHOT_WORKFLOW, args.target_branch,
+                         snapshot_dispatch_inputs(config.ACTIVE_SERIES))
     notice("Queue drained: asked for a snapshot")
 
 
