@@ -73,6 +73,18 @@ class TestTwoSeriesNeverSeeEachOther(unittest.TestCase):
             self.assertEqual([w.name for w in config.worlds()], ["2026.08/vita"])
             self.assertEqual(config.default_world().core, "sdk-core-2026.08.0")
 
+    def test_a_world_is_read_back_from_the_series_it_was_written_to(self):
+        # bump-core writes a core and then reads it back through a child
+        # process to prove the file still imports. Both series have a "vita"
+        # world, so a reader that has not selected a series finds the unnamed
+        # one -- and a correct write to 2026.08 came back looking like a
+        # mismatch against nightly's core the first time a named series was
+        # ever bumped.
+        with with_series(DEFAULT, BACKPORT):
+            self.assertEqual(config.world_by_arch("vita").core, "sdk-snapshot-1")
+            config.select_series("2026.08")
+            self.assertEqual(config.world_by_arch("vita").core, "sdk-core-2026.08.0")
+
     def test_the_core_marker_is_per_store_so_it_may_repeat(self):
         # Same file name in both, which is only safe because the releases
         # holding it are different ones.

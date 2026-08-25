@@ -582,9 +582,16 @@ def cmd_bump_core(args: Any) -> None:
     # all and the child would read the previous value back.
     cache = os.path.join(os.path.dirname(path), "__pycache__")
     shutil.rmtree(cache, ignore_errors=True)
+    # Selecting the series first is what makes this read the world that was
+    # just written. Worlds are looked up by architecture within a series, and
+    # every series has a "vita" one, so a child that never picks a series
+    # looks up the unnamed world and reports nightly's core -- which is how a
+    # correct write came back as a mismatch the first time a named series was
+    # ever bumped.
     result = subprocess.run(
         ["python3", "-B", "-c",
          "from vitasdk_autobuild import config; "
+         f"config.select_series({world.series!r}); "
          f"print(config.world_by_arch({world.arch!r}).core)"],
         capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(path)))
     if result.returncode != 0 or result.stdout.strip() != args.core:
