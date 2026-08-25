@@ -88,7 +88,12 @@ TRANSACTION_OPTIONS = ("--noscriptlet", "--noconfirm", "--noprogressbar")
 
 
 def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Runs the SDK's own pacman against the SDK prefix.
+    """Runs the SDK's own pacman against the SDK prefix, through vdpm.
+
+    Through vdpm rather than by path: where the client lives is vdpm's
+    business, and it has moved once already. vdpm derives the prefix from
+    $VITASDK and supplies --config/--root/--dbpath/--cachedir/--logfile
+    itself; it does not add the transaction options, so those stay here.
 
     As the build user, not as root: the prefix belongs to that user and the
     package client is rootless by design. Running it as root would leave
@@ -97,17 +102,15 @@ def pacman(sdk: str, *arguments: str, check: bool = True) -> subprocess.Complete
     predecessor did not need.
     """
 
+    # vdpm reads the prefix out of the environment, so the caller's sdk is
+    # what goes in it. Otherwise the two could disagree about where to write.
+    environment = dict(os.environ, VITASDK=sdk)
     command = as_build_user([
-        os.path.join(sdk, "bin", "pacman"),
-        "--config", os.path.join(sdk, "etc", "pacman.conf"),
-        "--root", sdk,
-        "--dbpath", os.path.join(sdk, "var", "lib", "pacman"),
-        "--cachedir", os.path.join(sdk, "var", "cache", "pacman", "pkg"),
-        "--logfile", os.path.join(sdk, "var", "log", "pacman.log"),
+        os.path.join(sdk, "bin", "vdpm"), "pacman", "--",
         *(TRANSACTION_OPTIONS if any(a in TRANSACTIONS for a in arguments) else ()),
         *arguments,
-    ], os.environ, ["PATH", "HOME", "VITASDK"])
-    result = subprocess.run(command, capture_output=True, text=True)
+    ], environment, ["PATH", "HOME", "VITASDK"])
+    result = subprocess.run(command, capture_output=True, text=True, env=environment)
     if result.returncode != 0:
         # Without this the client's own explanation is swallowed and the
         # failure reads as a bare exit code.

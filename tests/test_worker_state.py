@@ -85,15 +85,31 @@ class TestRootlessPacman(unittest.TestCase):
 
     def test_every_path_stays_inside_the_prefix(self):
         # The self contained prefix contract: nothing is written outside it.
+        # vdpm is what derives --root and the rest, and it derives them from
+        # the environment, so the prefix is asserted where it now enters.
         import subprocess as sp
         ok = sp.CompletedProcess([], 0, "", "")
         with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
             with mock.patch("subprocess.run", return_value=ok) as run:
                 build.pacman("/opt/vitasdk", "--query")
         arguments = run.call_args[0][0]
-        for flag in ("--root", "--dbpath", "--cachedir", "--logfile", "--config"):
-            value = arguments[arguments.index(flag) + 1]
-            self.assertTrue(value.startswith("/opt/vitasdk"), f"{flag} -> {value}")
+        self.assertEqual(arguments[0], "/opt/vitasdk/bin/vdpm")
+        self.assertEqual(run.call_args[1]["env"]["VITASDK"], "/opt/vitasdk")
+
+    def test_the_client_is_not_looked_for_by_path(self):
+        # bin/pacman became libexec/vdpm/pacman and every dependency install
+        # died for a week. Naming the client's own path is what did it.
+        import subprocess as sp
+        ok = sp.CompletedProcess([], 0, "", "")
+        with mock.patch.object(build, "as_build_user", side_effect=lambda c, e, k: list(c)):
+            with mock.patch("subprocess.run", return_value=ok) as run:
+                build.pacman("/opt/vitasdk", "--upgrade", "/tmp/zlib.pkg.tar.xz")
+        arguments = run.call_args[0][0]
+        self.assertNotIn("/opt/vitasdk/bin/pacman", arguments)
+        self.assertEqual(arguments[:3], ["/opt/vitasdk/bin/vdpm", "pacman", "--"])
+        # vdpm does not add these for a raw pacman call, so they stay here.
+        for option in build.TRANSACTION_OPTIONS:
+            self.assertIn(option, arguments)
 
 class TestPrefixOwnership(unittest.TestCase):
     """makepkg reads and creates the package database to write .BUILDINFO."""
