@@ -17,7 +17,10 @@ from vitasdk_autobuild import build, srcinfo
 from vitasdk_autobuild.utils import as_build_user, get_build_user, give_to_build_user
 
 SDK = os.environ.get("VITASDK", "")
-ENABLED = bool(SDK) and os.path.exists(os.path.join(SDK, "bin", "pacman"))
+# Only a missing SDK is a reason to skip. This also required the client to be
+# at a path it named itself, which switched these tests off in precisely the
+# case they exist to catch: an installed SDK whose client had moved.
+ENABLED = bool(SDK)
 
 
 @unittest.skipUnless(ENABLED, "needs an installed SDK: set VITASDK")
@@ -25,6 +28,14 @@ class TestAgainstRealPacman(unittest.TestCase):
 
     def setUp(self):
         build.prepare_prefix(SDK)
+
+    def test_the_package_client_can_be_reached_at_all(self):
+        # The one that would have caught bin/pacman becoming
+        # libexec/vdpm/pacman: every dependency install died on the old path
+        # for a week while this suite reported success by skipping itself.
+        result = build.pacman(SDK, "--version", check=False)
+        self.assertEqual(result.returncode, 0,
+                         f"vdpm could not run pacman: {result.stderr or result.stdout}")
 
     def test_the_package_database_can_be_created(self):
         # As the build user, in a tree this process created as root. makepkg
