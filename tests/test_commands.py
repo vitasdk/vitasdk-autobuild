@@ -497,3 +497,52 @@ class TestChannelRequest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestShortCatalogueIsLoud(unittest.TestCase):
+    """A catalogue that publishes less than the recipes declare says so.
+
+    Withholding a package whose group did not finish is correct; announcing
+    "repository with 75 package(s)" and going green while 57 are missing is
+    not. That is how freetype, libpng, libvita2d and vitaGL stayed out of the
+    channel for a week.
+    """
+
+    def statuses(self, **states):
+        packages = []
+        for name, status in states.items():
+            package = make_package(name)
+            package.set_status(WORLD, status, {})
+            packages.append(package)
+        return packages
+
+    def test_a_complete_catalogue_says_nothing(self):
+        packages = self.statuses(zlib=PackageStatus.FINISHED,
+                                 libpng=PackageStatus.FINISHED)
+        commands.report_short_catalogue(packages)
+
+    def test_a_withheld_package_fails_the_run(self):
+        packages = self.statuses(zlib=PackageStatus.FINISHED,
+                                 libpng=PackageStatus.FINISHED_BUT_BLOCKED)
+        with self.assertRaises(SystemExit) as caught:
+            commands.report_short_catalogue(packages)
+        self.assertIn("1 package(s)", str(caught.exception))
+
+    def test_a_failed_package_fails_the_run(self):
+        packages = self.statuses(ffmpeg=PackageStatus.FAILED_TO_BUILD)
+        with self.assertRaises(SystemExit):
+            commands.report_short_catalogue(packages)
+
+    def test_it_names_them_rather_than_counting_them(self):
+        import contextlib, io
+        packages = self.statuses(zlib=PackageStatus.FINISHED,
+                                 freetype=PackageStatus.FINISHED_BUT_BLOCKED,
+                                 libpng=PackageStatus.FINISHED_BUT_BLOCKED)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit):
+                commands.report_short_catalogue(packages)
+        printed = out.getvalue()
+        self.assertIn("freetype", printed)
+        self.assertIn("libpng", printed)
+        self.assertNotIn("zlib", printed)
