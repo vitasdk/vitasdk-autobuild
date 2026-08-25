@@ -83,6 +83,11 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    # A world whose image will not build is that world's problem. Failing the
+    # job here failed the whole call, and every series was then skipped --
+    # including the ones whose image was sitting in the registry, built and
+    # ready. Whoever needs an image checks it is there; see build.yml.
+    continue-on-error: true
     name: ${{ matrix.arch }}
     env:
       VITASDK_AUTOBUILD_CACHE: ${{ github.workspace }}/.autobuild-cache
