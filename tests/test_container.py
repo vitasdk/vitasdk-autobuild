@@ -10,6 +10,7 @@ image and nowhere else.
 """
 
 import os
+import shutil
 import subprocess
 import unittest
 
@@ -36,6 +37,58 @@ class TestAgainstRealPacman(unittest.TestCase):
         result = build.pacman(SDK, "--version", check=False)
         self.assertEqual(result.returncode, 0,
                          f"vdpm could not run pacman: {result.stderr or result.stdout}")
+
+    def test_a_package_can_really_be_installed(self):
+        """The path that broke five times, exercised as a transaction.
+
+        Asking pacman for its version proves it can be found. It does not
+        prove a dependency can be installed, which is what every build does
+        first and what died with exit 127 for a week: a query and an upgrade
+        take different options, run as different users against different
+        directories, and only one of them writes.
+
+        A package built here rather than downloaded, so this needs no network
+        and no channel -- the subject is the client and the prefix.
+        """
+
+        package = self.build_tiny_package("vitasdk-autobuild-probe", "1.0-1")
+        give_to_build_user(os.path.dirname(package))
+        try:
+            result = build.pacman(SDK, "--upgrade", "--asdeps", "--needed",
+                                  package, check=False)
+            self.assertEqual(result.returncode, 0,
+                             f"installing a package failed: {result.stderr or result.stdout}")
+            self.assertIn("vitasdk-autobuild-probe",
+                          build.installed_dependencies(SDK))
+        finally:
+            build.reset_dependencies(SDK)
+        self.assertNotIn("vitasdk-autobuild-probe",
+                         build.installed_dependencies(SDK))
+
+    def build_tiny_package(self, name, version):
+        """A valid package with nothing in it, in a directory of its own."""
+
+        import io
+        import tarfile
+        import tempfile
+
+        pkgver, pkgrel = version.split("-")
+        directory = tempfile.mkdtemp(prefix="vitasdk-probe-pkg-")
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        path = os.path.join(directory, f"{name}-{version}-any.pkg.tar.xz")
+        # "any" rather than the target architecture: what is under test is the
+        # transaction, and an architecture mismatch would refuse it earlier
+        # for a reason that has nothing to do with the client's whereabouts.
+        pkginfo = (f"pkgname = {name}\n"
+                   f"pkgver = {version}\n"
+                   f"pkgdesc = probe\n"
+                   f"arch = any\n"
+                   f"size = 0\n").encode()
+        with tarfile.open(path, "w:xz") as archive:
+            info = tarfile.TarInfo(".PKGINFO")
+            info.size = len(pkginfo)
+            archive.addfile(info, io.BytesIO(pkginfo))
+        return path
 
     def test_the_package_database_can_be_created(self):
         # As the build user, in a tree this process created as root. makepkg
