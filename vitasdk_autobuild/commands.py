@@ -302,6 +302,41 @@ def queue_is_drained(packages: list[Package]) -> bool:
     return not any(build_plan.queued_in(packages, world) for world in config.worlds())
 
 
+def report_short_catalogue(packages: list[Package]) -> None:
+    """Fails the run when the catalogue is short of what the recipes declare.
+
+    Withholding is right: a package whose group did not finish must not
+    publish, or the repository would describe something that cannot be
+    installed. Saying nothing about it is not. A round that published 75 of
+    132 announced "repository with 75 package(s)" and went green, and the
+    other 57 -- freetype, libpng, libvita2d, vitaGL and everything behind
+    them -- were missing from the channel for a week before anybody noticed.
+
+    Named rather than counted, and raised after the snapshot is asked for:
+    publishing the coherent subset is still the right thing to do, and this
+    is about whether a person is told.
+    """
+
+    missing: dict[str, list[str]] = {}
+    for world in config.worlds():
+        short = [package.name for package in packages
+                 if package.builds_for(world)
+                 and package.get_status(world) is not PackageStatus.FINISHED]
+        if short:
+            missing[world.name] = sorted(short)
+
+    if not missing:
+        return
+
+    for world_name, names in missing.items():
+        with group(f"[{world_name}] short of the recipes by {len(names)}"):
+            print("\n".join(names))
+    total = sum(len(names) for names in missing.values())
+    raise SystemExit(
+        f"ERROR: the catalogue published without {total} package(s) the "
+        "recipes declare; the snapshot above holds only what is coherent")
+
+
 def snapshot_dispatch_inputs(series: str) -> dict[str, str]:
     """Inputs for the snapshot.yml dispatch.
 
@@ -371,6 +406,7 @@ def cmd_supervise(args: Any) -> None:
     gh.dispatch_workflow(repo, SNAPSHOT_WORKFLOW, args.target_branch,
                          snapshot_dispatch_inputs(config.ACTIVE_SERIES))
     notice("Queue drained: asked for a snapshot")
+    report_short_catalogue(snapshot.packages)
 
 
 # ---------------------------------------------------------------- repository
