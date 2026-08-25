@@ -107,7 +107,7 @@ WORLDS: list[World] = [
     # exactly what defines a world.
     World(
         arch="vita",
-        core="sdk-core-2026.08.0",
+        core="sdk-snapshot-20260825.611.1",
         repository="vita",
         triple="arm-vita-eabi",
         description="gcc and newlib",
