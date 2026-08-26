@@ -85,7 +85,7 @@ PACKAGES_BRANCH = "master"
 # which runs on a bare runner. Keep it in sync with VITA_MAKEPKG_TAG in
 # vitasdk/buildscripts.
 VITA_MAKEPKG_REPO = "vitasdk/vita-makepkg"
-VITA_MAKEPKG_REF = "32f863c2a58a801b7d5a0296bdbbb443c9676e08"
+VITA_MAKEPKG_REF = "bbd1b18731cf8b6a69a18c9acdefd79a5b8c36eb"
 
 # The worlds the catalogue is built for. One entry today; a second toolchain
 # or libc is a second entry, and nothing else in this program has to change.
