@@ -108,6 +108,16 @@ def build_parser() -> argparse.ArgumentParser:
                            help="keep the built files here, to publish as artifacts")
     try_build.set_defaults(func=commands.cmd_try_build)
 
+    try_pulls = subparsers.add_parser(
+        "try-pull-requests",
+        help="build the recipes open proposals change, once each")
+    try_pulls.add_argument("--ref", default="master",
+                           help="branch of this repository holding the workflow to run")
+    try_pulls.add_argument("--limit", type=int, default=10,
+                           help="most builds to start in one round")
+    try_pulls.add_argument("--dry-run", action="store_true")
+    try_pulls.set_defaults(func=commands.cmd_try_pull_requests)
+
     clean = subparsers.add_parser(
         "clean-assets", help="delete staged files no recipe asks for any more")
     clean.add_argument("--dry-run", action="store_true")

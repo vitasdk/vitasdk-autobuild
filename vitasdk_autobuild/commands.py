@@ -11,14 +11,15 @@ import tempfile
 import time
 from typing import Any
 
-from . import (build, build_plan, config, gh, queue, recipes, report, repository,
-               srcinfo, state)
+from . import (build, build_plan, config, gh, proposals, queue, recipes, report,
+               repository, srcinfo, state)
 from .config import World
 from .queue import Package, PackageStatus
 from .utils import group, notice, sanitize_tag, trust_git_checkouts
 
 WORKER_WORKFLOW = "build-jobs.yml"
 SNAPSHOT_WORKFLOW = "snapshot.yml"
+TRY_WORKFLOW = "try-build.yml"
 
 
 def image_tag(world: World, packages_dir: str | None = None) -> str:
@@ -543,6 +544,55 @@ def publish_snapshot(output_dir: str, package_count: int, series: str, world: st
 
 
 # ---------------------------------------------------------------- cleanup
+
+def cmd_try_pull_requests(args: Any) -> None:
+    """Builds the recipes open proposals change, once each.
+
+    Asked for from here on a timer rather than pushed from the recipe
+    repository, which would need a token able to start workflows here. The
+    commit status try-build writes is the record of what has been tried, so a
+    proposal pushed to again is tried again and one only commented on is not.
+    """
+
+    repo = gh.get_current_repo()
+    pulls = gh.api_list(f"/repos/{config.PACKAGES_REPO}/pulls?state=open&per_page=100")
+    wanted: list[tuple[dict[str, Any], str]] = []
+    for pull in pulls:
+        skip = proposals.reason_to_skip(pull)
+        if skip:
+            print(f"#{pull['number']}: skipped, {skip}", flush=True)
+            continue
+        files = gh.api_list(
+            f"/repos/{config.PACKAGES_REPO}/pulls/{pull['number']}/files?per_page=100")
+        touched = proposals.recipes_touched(f["filename"] for f in files)
+        if not touched:
+            print(f"#{pull['number']}: touches no recipe", flush=True)
+            continue
+        sha = pull["head"]["sha"]
+        statuses = gh.api_list(f"/repos/{config.PACKAGES_REPO}/commits/{sha}/statuses")
+        for package in touched:
+            if proposals.already_tried(statuses, package):
+                continue
+            wanted.append((pull, package))
+
+    if len(wanted) > args.limit:
+        dropped = [f"#{p['number']} {name}" for p, name in wanted[args.limit:]]
+        notice(f"not trying {len(dropped)} of {len(wanted)} this round: "
+               + ", ".join(dropped))
+        wanted = wanted[:args.limit]
+
+    for pull, package in wanted:
+        print(f"#{pull['number']}: trying {package}", flush=True)
+        if args.dry_run:
+            continue
+        gh.dispatch_workflow(repo, TRY_WORKFLOW, args.ref, {
+            "package": package,
+            "packages_branch": proposals.pull_ref(pull),
+            "status_sha": pull["head"]["sha"],
+        })
+    if not wanted:
+        print("nothing to try", flush=True)
+
 
 def cmd_clean_assets(args: Any) -> None:
     snapshot = state.get_queue_with_status()
