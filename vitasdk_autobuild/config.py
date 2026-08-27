@@ -205,6 +205,13 @@ OPTIONAL_DEPS: dict[str, list[str]] = {}
 # that a build actually pulls in is the one that gets installed.
 CONFLICTING_DEPS: list[list[str]] = [
     ["openssl", "openssl-1.1.1"],
+    # sdl2_vitagl is the same SDL with a vitaGL video backend, so it declares
+    # provides=sdl2 and the two must never be installed together. sdl2 is last
+    # and therefore wins: it is what the six sdl2_* satellites are built
+    # against, and it is the one that needs no OpenGL and no module the user
+    # has to supply. Asking for the vitaGL one stays a decision a project
+    # makes for itself.
+    ["sdl2_vitagl", "sdl2"],
 ]
 
 # Users allowed to upload assets by hand. Anything uploaded by anyone else

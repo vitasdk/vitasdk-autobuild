@@ -75,6 +75,20 @@ class TestSelectDependencyAssets(unittest.TestCase):
             config.CONFLICTING_DEPS = original
 
 
+    def test_the_plain_sdl2_wins_over_the_vitagl_one(self):
+        # Both provide sdl2 and a build that pulls in either must get one of
+        # them. The satellites are built against the plain one, so it is the
+        # one that has to survive; the group's order is what decides that.
+        new = make_package("sdl2")
+        vgl = make_package("sdl2_vitagl", provides=["sdl2"])
+        image = make_package("sdl2_image", depends=["sdl2", "sdl2_vitagl"])
+        queue_of(new, vgl, image)
+        assets = [make_asset("sdl2-1.0-1-vita.pkg.tar.xz"),
+                  make_asset("sdl2_vitagl-1.0-1-vita.pkg.tar.xz")]
+        selected = build.select_dependency_assets(image, WORLD, assets)
+        self.assertEqual([a.filename for a in selected], ["sdl2-1.0-1-vita.pkg.tar.xz"])
+
+
 class TestExpectedOutputs(unittest.TestCase):
 
     def test_accepts_the_expected_file(self):
