@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, replace
 
+from . import config
 from . import srcinfo
 from . import version as version_module
 
@@ -78,6 +79,43 @@ def declared_follow(text: str) -> list[str]:
         return [item.strip("'\"") for item in shlex.split(value[1:-1]) if item.strip("'\"")]
     value = value.strip("'\"")
     return [value] if value else []
+
+
+# An attribute a recipe makes conditional on the architecture, such as
+# depends_vita or sha256sums_vita-softfp. makepkg folds these into the plain
+# attribute for the CARCH it happens to run with.
+ARCH_SUFFIXED_FIELDS = ("source", "depends", "makedepends", "checkdepends",
+                        "optdepends", "provides", "conflicts", "replaces",
+                        "md5sums", "sha1sums", "sha256sums", "sha512sums",
+                        "b2sums")
+
+CARCH_USE = re.compile(r"\$\{?CARCH\b")
+
+
+def declared_per_arch(text: str) -> list[str]:
+    """What in a recipe would read differently in a different world.
+
+    Recipe metadata is read once per run and shared by every world: the queue
+    holds one version, one source list and one set of dependencies for a
+    package, whichever worlds it builds for. A recipe that varies any of
+    those by architecture cannot be represented that way, and would describe
+    one world while being built for another.
+
+    `arch=(...)` is deliberately not in this list. Restricting a package to
+    some worlds is the supported way to say a recipe does not build
+    everywhere, and the queue already reads it.
+    """
+
+    arches = sorted({world.arch for world in config.WORLDS})
+    fields = "|".join(ARCH_SUFFIXED_FIELDS)
+    suffixes = "|".join(re.escape(arch) for arch in arches)
+    pattern = re.compile(rf"^({fields})_({suffixes})\s*\+?=", re.MULTILINE)
+
+    found = {match.group(0).split("=")[0].strip().rstrip("+")
+             for match in pattern.finditer(text)}
+    if CARCH_USE.search(text):
+        found.add("$CARCH")
+    return sorted(found)
 
 
 def declared_deprecation(text: str) -> str:

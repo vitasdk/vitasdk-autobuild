@@ -47,6 +47,57 @@ class TestRealRecipes(unittest.TestCase):
                         self.assertTrue(
                             pattern.endswith(f"-{world.arch}.pkg.tar.*"), pattern)
 
+    def test_no_recipe_varies_by_architecture(self):
+        # build_queue() refuses such a recipe, so getting a queue at all is
+        # most of the assertion. Reading the text again names the offender
+        # instead of only saying the catalogue is fine.
+        from vitasdk_autobuild import recipes
+        for package in self.packages:
+            path = os.path.join(self.packages_dir, package.repo_path, "VITABUILD")
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(recipes.declared_per_arch(handle.read()), [],
+                                 f"{package.name} varies by architecture")
+
+    def test_every_declared_architecture_is_a_configured_world(self):
+        # A typo in arch=(...) does not fail: it quietly removes the package
+        # from every world, and everything depending on it follows.
+        from vitasdk_autobuild import config
+        known = {world.arch for world in config.WORLDS} | {queue.ANY_ARCH}
+        for package in self.packages:
+            with self.subTest(package=package.name):
+                self.assertLessEqual(set(package.declared_arch), known)
+
+    def test_a_second_world_keeps_the_catalogue(self):
+        """Adding a world is a configuration entry, not 130 recipe edits.
+
+        Recipes that declare no arch inherit a new world for free, which is
+        what the whole variant design rests on. One that does declare an arch
+        opts out of every other world and takes everything depending on it
+        along, so this bounds how far that can spread before the axis stops
+        being worth having. It is a bound rather than a count because the
+        recipes live in their own repository and move on their own.
+        """
+
+        from vitasdk_autobuild import config
+        original = list(config.WORLDS)
+        try:
+            config.apply_overrides({"WORLDS": original + [
+                config.World(arch="vita-second", core="core-second",
+                             repository="vita-second", triple="arm-vita-eabi")]})
+            packages = queue.build_queue(self.packages_dir)
+        finally:
+            config.apply_overrides({"WORLDS": original})
+
+        lost = sorted(package.name for package in packages
+                      if not any(world.arch == "vita-second" for world in package.worlds))
+        # Half, not a number closer to the truth: the recipes move on their
+        # own and today's exact count would fail the day one of them opts out
+        # on purpose. What this has to catch is the axis being gutted, and the
+        # message is what tells whoever hits it which packages went.
+        self.assertGreater(
+            len(packages) - len(lost), len(packages) // 2,
+            f"a second world would lose {len(lost)} of {len(packages)} packages: {lost}")
+
     def test_the_queue_has_no_cycles(self):
         queue.apply_status(self.packages, [], [])
         self.assertEqual(queue.get_cycles(self.packages), [])
