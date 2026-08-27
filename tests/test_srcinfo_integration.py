@@ -58,15 +58,6 @@ class TestRealRecipes(unittest.TestCase):
                 self.assertEqual(recipes.declared_per_arch(handle.read()), [],
                                  f"{package.name} varies by architecture")
 
-    def test_every_declared_architecture_is_a_configured_world(self):
-        # A typo in arch=(...) does not fail: it quietly removes the package
-        # from every world, and everything depending on it follows.
-        from vitasdk_autobuild import config
-        known = {world.arch for world in config.WORLDS} | {queue.ANY_ARCH}
-        for package in self.packages:
-            with self.subTest(package=package.name):
-                self.assertLessEqual(set(package.declared_arch), known)
-
     def test_a_second_world_keeps_the_catalogue(self):
         """Adding a world is a configuration entry, not 130 recipe edits.
 

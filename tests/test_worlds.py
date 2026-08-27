@@ -28,11 +28,28 @@ class TestWhichWorldsARecipeBuildsFor(unittest.TestCase):
         package = make_package("zlib", worlds=BOTH)
         self.assertEqual([w.arch for w in package.worlds], ["vita", "vita-musl"])
 
-    def test_a_declared_arch_restricts_it(self):
+    def test_a_declared_arch_no_longer_restricts_it(self):
+        # arch is the first field anyone fills in when writing ordinary
+        # pacman metadata, so it must not double as an opt-out: doing that
+        # made filling in metadata remove a package from every other world.
         package = make_package("kubridge", arch=["vita"], worlds=BOTH)
+        self.assertEqual([w.arch for w in package.worlds], ["vita", "vita-musl"])
+
+    def test_a_world_excludes_what_it_cannot_build(self):
+        musl = config.World(arch="vita-musl", core="core-musl",
+                            repository="vita-musl", triple="arm-vita-muslabi",
+                            excludes=("kubridge",))
+        package = make_package("kubridge", worlds=[NEWLIB, musl])
         self.assertEqual([w.arch for w in package.worlds], ["vita"])
         self.assertTrue(package.builds_for(NEWLIB))
-        self.assertFalse(package.builds_for(MUSL))
+        self.assertFalse(package.builds_for(musl))
+
+    def test_an_exclusion_is_a_pattern(self):
+        musl = config.World(arch="vita-musl", core="core-musl",
+                            repository="vita-musl", triple="arm-vita-muslabi",
+                            excludes=("taihen*",))
+        self.assertFalse(musl.builds("taihen-user"))
+        self.assertTrue(musl.builds("zlib"))
 
     def test_the_file_name_carries_the_world(self):
         package = make_package("zlib", "1.3.2-2", worlds=BOTH)
@@ -69,11 +86,19 @@ class TestStatusIsPerWorld(unittest.TestCase):
 
 
 class TestImpossibleWorlds(unittest.TestCase):
-    """A recipe can name a world its dependencies do not support."""
+    """A world can exclude something other packages depend on."""
+
+    MUSL_NO_TAIHEN = config.World(arch="vita-musl", core="core-musl",
+                                  repository="vita-musl",
+                                  triple="arm-vita-muslabi",
+                                  excludes=("taihen",))
+
+    def worlds(self):
+        return [NEWLIB, self.MUSL_NO_TAIHEN]
 
     def test_a_package_loses_a_world_its_dependency_lacks(self):
-        vita_only = make_package("taihen", arch=["vita"], worlds=BOTH)
-        user = make_package("kubridge", depends=["taihen"], worlds=BOTH)
+        vita_only = make_package("taihen", worlds=self.worlds())
+        user = make_package("kubridge", depends=["taihen"], worlds=self.worlds())
         packages = [vita_only, user]
         queue.link_dependencies(packages)
         dropped = queue.prune_impossible_worlds(packages)
@@ -83,9 +108,9 @@ class TestImpossibleWorlds(unittest.TestCase):
         self.assertTrue(user.builds_for(NEWLIB))
 
     def test_pruning_propagates_to_dependents(self):
-        vita_only = make_package("taihen", arch=["vita"], worlds=BOTH)
-        middle = make_package("kubridge", depends=["taihen"], worlds=BOTH)
-        top = make_package("uvdb", depends=["kubridge"], worlds=BOTH)
+        vita_only = make_package("taihen", worlds=self.worlds())
+        middle = make_package("kubridge", depends=["taihen"], worlds=self.worlds())
+        top = make_package("uvdb", depends=["kubridge"], worlds=self.worlds())
         packages = [vita_only, middle, top]
         queue.link_dependencies(packages)
         queue.prune_impossible_worlds(packages)
@@ -116,10 +141,13 @@ class TestPlanningAcrossWorlds(unittest.TestCase):
         self.assertEqual(by_world["vita-musl"][0]["image-tag"], "image-musl")
 
     def test_a_world_with_nothing_queued_asks_for_no_workers(self):
-        zlib = make_package("zlib", arch=["vita"], worlds=BOTH)
-        apply([zlib])
+        musl = config.World(arch="vita-musl", core="core-musl",
+                            repository="vita-musl", triple="arm-vita-muslabi",
+                            excludes=("zlib",))
+        zlib = make_package("zlib", worlds=[NEWLIB, musl])
+        queue.apply_status([zlib], [], [], None, [NEWLIB, musl])
         plan = build_plan.create_build_plan(
-            [zlib], {"vita": "a", "vita-musl": "b"}, BOTH)
+            [zlib], {"vita": "a", "vita-musl": "b"}, [NEWLIB, musl])
         self.assertEqual([job["name"] for job in plan], ["vita"])
 
     def test_the_worker_cap_covers_every_world_together(self):

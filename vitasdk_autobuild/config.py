@@ -4,6 +4,7 @@ Everything that decides *what* gets built lives here, so that changing the
 plan is a reviewable commit and never a click in a web UI.
 """
 
+import fnmatch
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +40,16 @@ class World:
 
     description: str = ""
 
+    excludes: tuple[str, ...] = ()
+    """Packages that do not build for this world, matched with fnmatch.
+
+    Kept here rather than in the recipes because it is a statement about the
+    world, not about the package: the recipe is the same one every world
+    builds, and whoever writes it has no way to know which worlds exist. It
+    is also a commit somebody reviews, which is what excluding a package
+    should be -- one of them takes everything depending on it along.
+    """
+
     series: str = ""
     """The release series these packages belong to, empty for the unnamed one.
 
@@ -61,6 +72,10 @@ class World:
         """What identifies this world among all of them."""
 
         return f"{self.series}/{self.arch}" if self.series else self.arch
+
+    def builds(self, package_name: str) -> bool:
+        return not any(fnmatch.fnmatch(package_name, pattern)
+                       for pattern in self.excludes)
 
     @property
     def core_marker(self) -> str:

@@ -53,14 +53,17 @@ class Package:
         configured = list(worlds) if worlds is not None else config.worlds()
         declared = [a for a in info.get("arch", []) if a]
 
-        # No arch means the recipe takes whatever the environment builds for,
-        # so it belongs to every world. A declared list restricts it, which is
-        # how a recipe says "this one is newlib only".
+        # A recipe builds for every world unless that world says otherwise.
+        # It used to be able to restrict itself by naming architectures, but
+        # arch is also the first field anyone fills in when writing ordinary
+        # pacman metadata, and doing so silently removed the package and
+        # everything depending on it from every other world. Which packages a
+        # world cannot build is now the world's own business, in config.
+        #
+        # arch=('any') still means what it says: one file, no architecture in
+        # its name, serving every world at once.
         self.any_arch: bool = ANY_ARCH in declared
-        if not declared or self.any_arch:
-            self.worlds: list[World] = list(configured)
-        else:
-            self.worlds = [w for w in configured if w.arch in declared]
+        self.worlds: list[World] = [w for w in configured if w.builds(self.name)]
         self.declared_arch: list[str] = declared
 
         self.binaries: dict[str, dict[str, Any]] = {}
