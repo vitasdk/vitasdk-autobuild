@@ -92,7 +92,9 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.package || github.event.client_payload.package }}-${{ matrix.world }}
+          # Not matrix.world: a world in a named series is called
+          # <series>/<arch>, and an artifact name cannot hold a slash.
+          name: ${{ inputs.package || github.event.client_payload.package }}-${{ matrix.arch }}${{ matrix.series != '' && format('-{0}', matrix.series) || '' }}
           path: ${{ runner.temp }}/built/*.pkg.tar.*
           if-no-files-found: ignore
 
