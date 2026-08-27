@@ -1,0 +1,53 @@
+name: try-pull-requests
+
+# Builds the recipes open proposals change, and puts the answer on them.
+#
+# The recipe repository cannot start this: the build image is private to this
+# repository and a proposal's own token cannot pull it, and pushing from
+# there would mean keeping a token able to start workflows here in a
+# repository that holds none. So this side asks, on a timer.
+#
+# The commit status try-build writes is the record of what has been tried, so
+# nothing here has to remember: a proposal pushed to again is tried again,
+# one only commented on is not.
+
+on:
+  schedule:
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Say what would be tried without starting anything
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: try-pull-requests
+  cancel-in-progress: false
+
+jobs:
+  ask:
+    # A schedule only ever runs from the default branch, but saying so means a
+    # copy of this file on another branch cannot quietly start builds too.
+    if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Try what the open proposals change
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          arguments=(try-pull-requests --ref "${GITHUB_REF_NAME}")
+          [[ $DRY_RUN == true ]] && arguments+=(--dry-run)
+          python3 -m vitasdk_autobuild "${arguments[@]}"

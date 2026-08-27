@@ -151,6 +151,31 @@ class TestWorkerWorkflow(unittest.TestCase):
         self.document = load(os.path.join(WORKFLOW_DIR, "build-jobs.yml"))
         self.job = self.document["jobs"]["build"]
 
+    def test_a_caller_only_reads_outputs_the_called_workflow_declares(self):
+        """A called workflow hands back what it declares and nothing else.
+
+        Reading one it does not declare gives an empty string rather than an
+        error, so the caller fails wherever it uses the value -- for a matrix,
+        before the job exists, which is a run that fails with no job and no
+        log saying why.
+        """
+
+        for path in workflow_files():
+            document = load(path)
+            for name, job in (document.get("jobs") or {}).items():
+                called = job.get("uses", "")
+                if not called.startswith("./.github/workflows/"):
+                    continue
+                target = load(os.path.join(
+                    os.path.dirname(WORKFLOW_DIR), "workflows",
+                    os.path.basename(called)))
+                declared = set(((target.get(True) or target.get("on") or {})
+                                .get("workflow_call") or {}).get("outputs") or {})
+                read = set(re.findall(rf"needs\.{re.escape(name)}\.outputs\.([A-Za-z0-9_-]+)",
+                                      open(path, encoding="utf-8").read()))
+                with self.subTest(workflow=os.path.basename(path), job=name):
+                    self.assertLessEqual(read, declared)
+
     def test_the_supervisor_dispatches_this_file(self):
         self.assertTrue(os.path.exists(os.path.join(WORKFLOW_DIR, commands.WORKER_WORKFLOW)))
 

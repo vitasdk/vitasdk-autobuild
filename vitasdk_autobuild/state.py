@@ -32,7 +32,7 @@ def packages_checkout() -> str:
 
     path = os.path.join(cache_root(), "packages")
     url = os.environ.get("PACKAGES_URL") or f"https://github.com/{config.PACKAGES_REPO}.git"
-    branch = os.environ.get("PACKAGES_BRANCH") or config.PACKAGES_BRANCH
+    ref = os.environ.get("PACKAGES_BRANCH") or config.PACKAGES_BRANCH
     if not os.path.exists(os.path.join(path, ".git")):
         run(["git", "init", "--quiet", path])
         run(["git", "-C", path, "remote", "add", "origin", url])
@@ -40,7 +40,13 @@ def packages_checkout() -> str:
     # master left over from 2021, and both `clone --branch` and a bare fetch
     # resolve that name to the tag. The recipes it holds are five years old and
     # the builds against them fail in ways that read like recipe bugs.
-    run(["git", "-C", path, "fetch", "--depth", "1", "origin", f"refs/heads/{branch}"])
+    #
+    # A ref given in full is taken as given, which is how a pull request from
+    # a fork is read: its branch is in the fork and not here, but the pull ref
+    # refs/pull/<n>/head is.
+    if not ref.startswith("refs/"):
+        ref = f"refs/heads/{ref}"
+    run(["git", "-C", path, "fetch", "--depth", "1", "origin", ref])
     run(["git", "-C", path, "checkout", "--quiet", "--force", "FETCH_HEAD"])
     run(["git", "-C", path, "clean", "-xfdq"])
     give_to_build_user(path)
