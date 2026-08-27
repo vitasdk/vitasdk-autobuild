@@ -59,6 +59,39 @@ class TestFindSources(unittest.TestCase):
         self.assertFalse(source.pinned)
 
 
+class TestPerArchDeclarations(unittest.TestCase):
+    """A recipe is read once and its answer serves every world."""
+
+    def test_a_plain_recipe_declares_nothing_per_arch(self):
+        self.assertEqual(recipes.declared_per_arch("pkgname=zlib\ndepends=('a')\n"), [])
+
+    def test_an_arch_suffixed_attribute_is_reported(self):
+        self.assertEqual(
+            recipes.declared_per_arch("pkgname=zlib\ndepends_vita=('a')\n"),
+            ["depends_vita"])
+
+    def test_appending_to_one_counts_too(self):
+        self.assertEqual(
+            recipes.declared_per_arch("source_vita+=('a')\n"), ["source_vita"])
+
+    def test_using_carch_is_reported(self):
+        self.assertEqual(recipes.declared_per_arch("build() { echo $CARCH; }"), ["$CARCH"])
+        self.assertEqual(recipes.declared_per_arch('build() { echo "${CARCH}"; }'), ["$CARCH"])
+
+    def test_a_similar_looking_name_is_not_a_false_positive(self):
+        self.assertEqual(recipes.declared_per_arch("depends_on=('a')\n_carch=1\n"), [])
+
+    def test_an_unconfigured_architecture_is_not_matched(self):
+        # Only the worlds this program knows about can change what a recipe
+        # means; anything else is somebody's private variable.
+        self.assertEqual(recipes.declared_per_arch("depends_amd64=('a')\n"), [])
+
+    def test_restricting_a_package_to_a_world_is_not_reported(self):
+        # arch=(...) is the supported way to say a recipe does not build
+        # everywhere, and the queue reads it.
+        self.assertEqual(recipes.declared_per_arch("arch=('vita')\n"), [])
+
+
 class TestExpand(unittest.TestCase):
 
     def test_expands_pkgname(self):

@@ -160,7 +160,17 @@ def collect(packages_dir: str) -> list[dict[str, Any]]:
         # makepkg only prints the fields it knows, so a declaration of its
         # own has to be read from the recipe text.
         with open(os.path.join(directory, "VITABUILD"), encoding="utf-8") as handle:
-            info["deprecated"] = recipes.declared_deprecation(handle.read())
+            text = handle.read()
+        info["deprecated"] = recipes.declared_deprecation(text)
+        # This runs once and its answer serves every world, so a recipe that
+        # would read differently in another one has to be refused rather than
+        # silently described by whichever architecture got here first.
+        per_arch = recipes.declared_per_arch(text)
+        if per_arch:
+            raise SystemExit(
+                f"ERROR: {name} varies by architecture ({', '.join(per_arch)}), but a "
+                "recipe is read once and shared by every world it builds for. Use "
+                "arch=(...) to restrict the package to some worlds instead.")
         return info
 
     with ThreadPoolExecutor(8) as executor:

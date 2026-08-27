@@ -4,6 +4,7 @@ Everything that decides *what* gets built lives here, so that changing the
 plan is a reviewable commit and never a click in a web UI.
 """
 
+import fnmatch
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +40,16 @@ class World:
 
     description: str = ""
 
+    excludes: tuple[str, ...] = ()
+    """Packages that do not build for this world, matched with fnmatch.
+
+    Kept here rather than in the recipes because it is a statement about the
+    world, not about the package: the recipe is the same one every world
+    builds, and whoever writes it has no way to know which worlds exist. It
+    is also a commit somebody reviews, which is what excluding a package
+    should be -- one of them takes everything depending on it along.
+    """
+
     series: str = ""
     """The release series these packages belong to, empty for the unnamed one.
 
@@ -61,6 +72,10 @@ class World:
         """What identifies this world among all of them."""
 
         return f"{self.series}/{self.arch}" if self.series else self.arch
+
+    def builds(self, package_name: str) -> bool:
+        return not any(fnmatch.fnmatch(package_name, pattern)
+                       for pattern in self.excludes)
 
     @property
     def core_marker(self) -> str:
@@ -190,6 +205,13 @@ OPTIONAL_DEPS: dict[str, list[str]] = {}
 # that a build actually pulls in is the one that gets installed.
 CONFLICTING_DEPS: list[list[str]] = [
     ["openssl", "openssl-1.1.1"],
+    # sdl2_vitagl is the same SDL with a vitaGL video backend, so it declares
+    # provides=sdl2 and the two must never be installed together. sdl2 is last
+    # and therefore wins: it is what the six sdl2_* satellites are built
+    # against, and it is the one that needs no OpenGL and no module the user
+    # has to supply. Asking for the vitaGL one stays a decision a project
+    # makes for itself.
+    ["sdl2_vitagl", "sdl2"],
 ]
 
 # Users allowed to upload assets by hand. Anything uploaded by anyone else
