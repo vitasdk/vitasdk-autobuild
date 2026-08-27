@@ -29,6 +29,9 @@ on:
       tag:
         description: Tag of the first world's image, for jobs that need only one
         value: ${{ jobs.plan.outputs.tag }}
+      matrix:
+        description: One entry per world, for a caller that fans out over them
+        value: ${{ jobs.plan.outputs.matrix }}
 
 permissions: {}
 
