@@ -120,12 +120,12 @@ WORLDS: list[World] = [
     # apart: a toolchain whose default float ABI is softfp, for ports that
     # link against Android libraries built for armeabi-v7a. A world and not a
     # channel because it changes the ABI of everything it compiles, and
-    # pacman refuses to put a vita package in a vita-softfp root, so the two
+    # pacman refuses to put a vita package in a vita_softfp root, so the two
     # cannot be mixed by accident.
     World(
-        arch="vita-softfp",
-        core="sdk-vita-softfp-snapshot-20260828.655.1",
-        repository="vita-softfp",
+        arch="vita_softfp",
+        core="sdk-vita_softfp-snapshot-20260828.667.1",
+        repository="vita_softfp",
         triple="arm-vita-eabi",
         description="gcc and newlib, softfp float ABI",
     ),
