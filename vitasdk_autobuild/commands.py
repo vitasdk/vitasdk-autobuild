@@ -432,7 +432,8 @@ def cmd_snapshot(args: Any) -> None:
         output_dir = os.path.join(work_dir, world.arch, name)
         repository.download(assets, packages_dir)
         repository.create_database(snapshot.packages_dir, packages_dir, output_dir,
-                                   source_date_epoch(snapshot.packages_dir), name)
+                                   source_date_epoch(snapshot.packages_dir), name,
+                                   world.arch)
         outputs[world.arch] = output_dir
         total += len(packages)
         notice(f"[{world.arch}] repository with {len(packages)} package(s)")
