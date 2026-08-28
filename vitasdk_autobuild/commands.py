@@ -420,6 +420,9 @@ def cmd_snapshot(args: Any) -> None:
     # One repository per world, side by side. Their file names differ by
     # architecture, so they never collide and a client picks the one it wants.
     outputs: dict[str, str] = {}
+    # In the order they were built, so the channel each world serves is asked
+    # for in that order too.
+    published: list[World] = []
     total = 0
     for world in config.worlds():
         packages = repository.selectable(snapshot.packages, world, include_blocked)
@@ -435,6 +438,7 @@ def cmd_snapshot(args: Any) -> None:
                                    source_date_epoch(snapshot.packages_dir), name,
                                    world.arch)
         outputs[world.arch] = output_dir
+        published.append(world)
         total += len(packages)
         notice(f"[{world.arch}] repository with {len(packages)} package(s)")
 
@@ -469,12 +473,16 @@ def cmd_snapshot(args: Any) -> None:
     if args.no_publish:
         return
     publish_snapshot(combined, total, config.ACTIVE_SERIES,
-                     config.default_world().arch, args.buildscripts_revision)
+                     published, args.buildscripts_revision)
 
 
-def request_channel_manifest(snapshot_tag: str, series: str, world: str,
+def request_channel_manifest(snapshot_tag: str, world: World,
                              buildscripts_revision: str) -> None:
     """Asks for a signed channel manifest naming this snapshot.
+
+    One per world. A snapshot holds every world's packages, told apart by the
+    database each names, but a channel serves exactly one: its manifest says
+    which core to install, and there is one core per world.
 
     The signing key lives in the repository that produces the manifest, so
     this asks rather than signs. Optional in the same way as the website
@@ -493,15 +501,15 @@ def request_channel_manifest(snapshot_tag: str, series: str, world: str,
     # runs after a snapshot has been published and must not be able to fail
     # the command that published it.
     here = os.environ.get("GITHUB_REPOSITORY", "")
-    core = config.default_world().core
-    channel = series or "nightly"
+    core = world.core
+    channel = world.channel
     try:
         gh.dispatch_repository(config.CHANNEL_REPO, config.CHANNEL_EVENT, token, {
             "core_snapshot": core,
             "packages_snapshot": snapshot_tag,
             "packages_repository": here,
             "channel": channel,
-            "world": world,
+            "world": world.arch,
             "buildscripts_sha": buildscripts_revision,
         })
         print(f"Asked {config.CHANNEL_REPO} for a channel manifest naming "
@@ -527,8 +535,8 @@ def deprecations(packages: Any) -> dict[str, str]:
             if package.deprecated}
 
 
-def publish_snapshot(output_dir: str, package_count: int, series: str, world: str,
-                     buildscripts_revision: str) -> str:
+def publish_snapshot(output_dir: str, package_count: int, series: str,
+                     worlds: list[World], buildscripts_revision: str) -> str:
     repo = gh.get_current_repo()
     tag = (config.snapshot_prefix() + time.strftime("%Y%m%d", time.gmtime())
            + f".{os.environ.get('GITHUB_RUN_NUMBER', '0')}"
@@ -540,7 +548,8 @@ def publish_snapshot(output_dir: str, package_count: int, series: str, world: st
         if os.path.isfile(path):
             gh.upload_asset(release, entry, path=path, replace=True)
     notice(f"Published {tag} with {package_count} package(s)")
-    request_channel_manifest(tag, series, world, buildscripts_revision)
+    for world in worlds:
+        request_channel_manifest(tag, world, buildscripts_revision)
     return tag
 
 
