@@ -448,25 +448,27 @@ class TestChannelRequest(unittest.TestCase):
         environ = {k: v for k, v in os.environ.items() if k != "CHANNEL_TOKEN"}
         with mock.patch.dict(os.environ, environ, clear=True):
             with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
-                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
-                                                  "vita", "buildscripts-sha")
+                commands.request_channel_manifest("packages-snapshot-1",
+                                                  config.default_world(),
+                                                  "buildscripts-sha")
         dispatch.assert_not_called()
 
     def test_the_request_names_the_snapshot_and_where_it_lives(self):
         import os
         from unittest import mock
+        named = [w for w in config.WORLDS if w.series == "2026.08"][0]
         with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret",
                                           "GITHUB_REPOSITORY": "vitasdk/vitasdk-autobuild"}):
             with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
-                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
-                                                  "vita", "buildscripts-sha")
+                commands.request_channel_manifest("packages-snapshot-1", named,
+                                                  "buildscripts-sha")
         repo, event, token = dispatch.call_args[0][:3]
         payload = dispatch.call_args[0][3]
         self.assertEqual(repo, config.CHANNEL_REPO)
         self.assertEqual(event, config.CHANNEL_EVENT)
         self.assertEqual(payload["packages_snapshot"], "packages-snapshot-1")
         self.assertEqual(payload["packages_repository"], "vitasdk/vitasdk-autobuild")
-        self.assertEqual(payload["core_snapshot"], config.default_world().core)
+        self.assertEqual(payload["core_snapshot"], named.core)
         self.assertEqual(payload["channel"], "2026.08")
         self.assertEqual(payload["world"], "vita")
         self.assertEqual(payload["buildscripts_sha"], "buildscripts-sha")
@@ -476,9 +478,47 @@ class TestChannelRequest(unittest.TestCase):
         from unittest import mock
         with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
             with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
-                commands.request_channel_manifest("packages-snapshot-1", "", "vita", "")
+                commands.request_channel_manifest("packages-snapshot-1",
+                                                  config.default_world(), "")
         payload = dispatch.call_args[0][3]
         self.assertEqual(payload["channel"], "nightly")
+
+    def test_each_world_asks_for_its_own_channel_and_its_own_core(self):
+        # A snapshot holds every world's packages, so one release is asked
+        # about twice. What differs is the core -- there is one per world --
+        # and the name somebody types to install it.
+        import os
+        from unittest import mock
+        softfp = [w for w in config.worlds() if w.channel_suffix]
+        if not softfp:
+            self.skipTest("only one world is configured")
+        world = softfp[0]
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "dispatch_repository") as dispatch:
+                commands.request_channel_manifest("packages-snapshot-1", world, "sha")
+        payload = dispatch.call_args[0][3]
+        self.assertEqual(payload["core_snapshot"], world.core)
+        self.assertNotEqual(payload["core_snapshot"], config.default_world().core)
+        self.assertEqual(payload["world"], world.arch)
+        self.assertEqual(payload["channel"], world.channel)
+        self.assertNotEqual(payload["channel"], "nightly")
+
+    def test_publishing_asks_once_for_every_world_that_shipped(self):
+        import os
+        from unittest import mock
+        worlds = config.worlds()
+        with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
+            with mock.patch.object(commands.gh, "get_current_repo"):
+                with mock.patch.object(commands.gh, "get_release"):
+                    with mock.patch.object(commands.gh, "upload_asset"):
+                        with mock.patch("os.listdir", return_value=[]):
+                            with mock.patch.object(commands.gh,
+                                                   "dispatch_repository") as dispatch:
+                                commands.publish_snapshot("/out", 1, "", worlds, "sha")
+        self.assertEqual(dispatch.call_count, len(worlds))
+        channels = [call[0][3]["channel"] for call in dispatch.call_args_list]
+        self.assertEqual(len(set(channels)), len(worlds),
+                         "two worlds asked for the same channel")
 
     def test_a_failed_request_does_not_undo_a_published_snapshot(self):
         import os
@@ -487,8 +527,9 @@ class TestChannelRequest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CHANNEL_TOKEN": "secret"}):
             with mock.patch.object(commands.gh, "dispatch_repository",
                                    side_effect=gh.GitHubError(404, "Not Found")):
-                commands.request_channel_manifest("packages-snapshot-1", "2026.08",
-                                                  "vita", "buildscripts-sha")
+                commands.request_channel_manifest("packages-snapshot-1",
+                                                  config.default_world(),
+                                                  "buildscripts-sha")
 
     def test_a_failed_request_says_how_to_recover_by_hand(self):
         import io
@@ -501,8 +542,9 @@ class TestChannelRequest(unittest.TestCase):
                                    side_effect=gh.GitHubError(404, "Not Found")):
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):
-                    commands.request_channel_manifest("packages-snapshot-1", "2026.08",
-                                                      "vita", "buildscripts-sha")
+                    named = [w for w in config.WORLDS if w.series == "2026.08"][0]
+                    commands.request_channel_manifest("packages-snapshot-1", named,
+                                                      "buildscripts-sha")
         message = out.getvalue()
         self.assertIn("::warning::", message)
         self.assertIn("workflow_dispatch", message)

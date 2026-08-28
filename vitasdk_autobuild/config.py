@@ -59,9 +59,27 @@ class World:
     that is the same in every series, so the series names the store instead.
     """
 
+    channel_suffix: str = ""
+    """Appended to a channel name to say this world serves it.
+
+    Written down rather than derived from the arch, for the same reason the
+    worlds are: a naming convention is a rule nobody can see, and the channel
+    name is what somebody types to install one of these.
+    """
+
     @property
     def prefix(self) -> str:
         return self.triple or self.arch
+
+    @property
+    def channel(self) -> str:
+        """What a channel serving this world is called.
+
+        From the world alone, so nobody can hand it the wrong series: a world
+        belongs to one, and the unnamed one is served by nightly.
+        """
+
+        return (self.series or "nightly") + self.channel_suffix
 
     @property
     def staging_repository(self) -> str:
@@ -128,6 +146,7 @@ WORLDS: list[World] = [
         repository="vita_softfp",
         triple="arm-vita-eabi",
         description="gcc and newlib, softfp float ABI",
+        channel_suffix="-softfp",
     ),
     # The master branches as they stood in August 2026: newlib 4.1 and the
     # headers without PR #886, which is what the homebrew out there is built
