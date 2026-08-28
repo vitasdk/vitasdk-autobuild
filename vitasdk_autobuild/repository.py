@@ -66,8 +66,13 @@ def download(assets: list[Asset], target_dir: str) -> list[str]:
 
 
 def create_database(packages_dir: str, input_dir: str, output_dir: str,
-                    source_date_epoch: str, repository_name: str) -> None:
-    """Runs the recipe repository's repository script in the Arch image."""
+                    source_date_epoch: str, repository_name: str,
+                    architecture: str) -> None:
+    """Runs the recipe repository's repository script in the Arch image.
+
+    The architecture is passed because the script validates every package
+    against it, and its own default is the first world that ever existed.
+    """
 
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -86,6 +91,7 @@ def create_database(packages_dir: str, input_dir: str, output_dir: str,
         "--mount", f"type=bind,source={parent},target=/output",
         "--env", f"SOURCE_DATE_EPOCH={source_date_epoch}",
         "--env", f"REPOSITORY_NAME={repository_name}",
+        "--env", f"EXPECTED_ARCHITECTURE={architecture}",
         ARCHLINUX_IMAGE,
         "bash", "-euc",
         f"/workspace/scripts/create-repository.sh /output/{os.path.basename(output_dir)} /input/*.pkg.tar.*",

@@ -374,7 +374,7 @@ class TestRepositoryGeneration(unittest.TestCase):
             with mock.patch("os.path.exists", return_value=False):
                 with mock.patch("os.makedirs"):
                     repository.create_database("/pkgs", "/in", "/tmp/out/repository",
-                                               "1", "vita")
+                                               "1", "vita", "vita")
         arguments = run.call_args[0][0]
         self.assertIn("--user", arguments)
         self.assertEqual(arguments[arguments.index("--user") + 1],
@@ -388,9 +388,24 @@ class TestRepositoryGeneration(unittest.TestCase):
             with mock.patch("os.path.exists", return_value=False):
                 with mock.patch("os.makedirs"):
                     repository.create_database("/pkgs", "/in", "/tmp/out/repository",
-                                               "1", "vita")
+                                               "1", "vita", "vita")
         arguments = run.call_args[0][0]
         self.assertIn("REPOSITORY_NAME=vita", arguments)
+
+    def test_the_architecture_reaches_the_script(self):
+        # The script validates every package against it and defaults to the
+        # first world that ever existed, so a second world's packages are all
+        # rejected when nobody says which one this is.
+        from unittest import mock
+        from vitasdk_autobuild import repository
+
+        with mock.patch.object(repository, "run") as run:
+            with mock.patch("os.path.exists", return_value=False):
+                with mock.patch("os.makedirs"):
+                    repository.create_database("/pkgs", "/in", "/tmp/out/repository",
+                                               "1", "vita_softfp-staging", "vita_softfp")
+        arguments = run.call_args[0][0]
+        self.assertIn("EXPECTED_ARCHITECTURE=vita_softfp", arguments)
 
 class TestWebsiteNotification(unittest.TestCase):
     """Telling the catalogue is an optimisation, never a requirement."""
