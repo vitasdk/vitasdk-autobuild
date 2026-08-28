@@ -111,7 +111,7 @@ VITA_MAKEPKG_REF = "bbd1b18731cf8b6a69a18c9acdefd79a5b8c36eb"
 WORLDS: list[World] = [
     World(
         arch="vita",
-        core="sdk-snapshot-20260828.657.1",
+        core="sdk-snapshot-20260828.662.1",
         repository="vita",
         triple="arm-vita-eabi",
         description="gcc and newlib",
