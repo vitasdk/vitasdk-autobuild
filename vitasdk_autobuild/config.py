@@ -145,7 +145,7 @@ WORLDS: list[World] = [
         core="sdk-vita_softfp-snapshot-20260828.667.1",
         repository="vita_softfp",
         triple="arm-vita-eabi",
-        description="gcc and newlib, softfp float ABI",
+        description="softfp float ABI, for ports that link Android .so files",
         channel_suffix="-softfp",
     ),
     # The master branches as they stood in August 2026: newlib 4.1 and the
