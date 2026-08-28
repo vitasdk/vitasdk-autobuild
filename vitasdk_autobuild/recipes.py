@@ -82,7 +82,7 @@ def declared_follow(text: str) -> list[str]:
 
 
 # An attribute a recipe makes conditional on the architecture, such as
-# depends_vita or sha256sums_vita-softfp. makepkg folds these into the plain
+# depends_vita or sha256sums_vita_softfp. makepkg folds these into the plain
 # attribute for the CARCH it happens to run with.
 ARCH_SUFFIXED_FIELDS = ("source", "depends", "makedepends", "checkdepends",
                         "optdepends", "provides", "conflicts", "replaces",
