@@ -142,6 +142,20 @@ jobs:
             echo "found $image"
           done < "$RUNNER_TEMP/wanted"
 
+      # The workers run the code on build-branch, not the ref this job plans
+      # from, and only core-update.yml ever moved it. Anything else that
+      # reached the default branch -- a new world, a changed build script --
+      # stayed invisible to them until a core bump happened to carry it along.
+      - name: Give the workers the code this run is planning with
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          git push --quiet --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:build-branch"
+
       - name: Plan, dispatch and follow the build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

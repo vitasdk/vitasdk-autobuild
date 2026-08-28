@@ -241,6 +241,17 @@ class TestSupervisorWorkflow(unittest.TestCase):
         self.assertEqual(self.document["jobs"]["supervise"]["strategy"]["matrix"]["series"],
                          "${{ fromJSON(needs.series.outputs.names) }}")
 
+    def test_the_workers_get_this_run_s_code_before_they_are_asked_for(self):
+        # The workers run build-branch, so code that reached the default
+        # branch any other way than a core bump never reached them.
+        steps = self.document["jobs"]["supervise"]["steps"]
+        pushes = [index for index, step in enumerate(steps)
+                  if "HEAD:build-branch" in step.get("run", "")]
+        dispatches = [index for index, step in enumerate(steps)
+                      if "supervise --target-branch" in step.get("run", "")]
+        self.assertTrue(pushes, "nothing advances build-branch")
+        self.assertLess(pushes[-1], dispatches[0])
+
     def test_every_step_that_touches_the_store_says_which_series(self):
         # A step that forgets it would read the default series' staging area
         # while supervising another one.
