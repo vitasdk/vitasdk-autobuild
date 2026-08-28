@@ -447,5 +447,37 @@ class TestMaintenanceWorkflow(unittest.TestCase):
         self.assertEqual(list(triggers(self.document)), ["workflow_dispatch"])
 
 
+@unittest.skipIf(yaml is None, "PyYAML is not installed")
+class TestCoreUpdateWorkflow(unittest.TestCase):
+    """The pin bot moves one world's core, and has to be told which."""
+
+    def setUp(self):
+        self.document = load(os.path.join(WORKFLOW_DIR, "core-update.yml"))
+        self.step = next(
+            step for step in self.document["jobs"]["bump"]["steps"]
+            if step.get("id") == "bump")
+
+    def test_it_refuses_a_core_with_no_world(self):
+        # Left out, this pinned the default world at whatever core arrived,
+        # which threw away a full catalogue against the wrong toolchain
+        # before anybody could see the pin was wrong.
+        run = self.step["run"]
+        self.assertIn("-z $WORLD", run)
+        self.assertNotIn("-n $WORLD", run,
+                         "an absent world is treated as a world again")
+
+    def test_the_world_is_always_passed_on(self):
+        self.assertIn('--world "$WORLD"', self.step["run"])
+
+    def test_asking_by_hand_has_to_name_one_too(self):
+        world = triggers(self.document)["workflow_dispatch"]["inputs"]["world"]
+        self.assertIs(world.get("required"), True)
+        self.assertNotIn("default", world,
+                         "a default is what makes forgetting it silent")
+
+    def test_the_world_reaches_the_step(self):
+        self.assertIn("WORLD", self.step["env"])
+
+
 if __name__ == "__main__":
     unittest.main()

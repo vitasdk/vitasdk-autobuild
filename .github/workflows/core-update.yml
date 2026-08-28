@@ -22,9 +22,9 @@ on:
         required: true
         type: string
       world:
-        description: Which world, by architecture (empty means the first one)
+        description: Which world, by architecture
+        required: true
         type: string
-        default: ''
       series:
         description: Release series whose pin moves, empty for the unnamed one
         type: string
@@ -64,10 +64,16 @@ jobs:
             echo '::error::no core snapshot given'
             exit 1
           fi
-          arguments=(bump-core --core "$CORE")
-          if [[ -n $WORLD ]]; then
-            arguments+=(--world "$WORLD")
+          # Which world the core is of decides whose catalogue gets dropped
+          # and rebuilt. Left out, this pinned the default world at whatever
+          # core arrived -- a softfp core against the default world's
+          # packages, which threw away a full catalogue before anybody could
+          # see it was the wrong pin.
+          if [[ -z $WORLD ]]; then
+            echo '::error::no world given; a core belongs to exactly one'
+            exit 1
           fi
+          arguments=(bump-core --core "$CORE" --world "$WORLD")
           python3 -m vitasdk_autobuild --series "$SERIES" "${arguments[@]}"
           if git diff --quiet; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
