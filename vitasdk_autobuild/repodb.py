@@ -75,6 +75,36 @@ def get_published_snapshots(limit: int = 10) -> list[dict[str, Any]]:
     return snapshots
 
 
+def get_published_cores(tag: str) -> dict[str, str]:
+    """The core each world of a published snapshot was built against.
+
+    Empty for a snapshot whose provenance cannot be read: not knowing is not
+    the same as knowing it matches.
+    """
+
+    if not tag:
+        return {}
+    repo = gh.get_snapshot_repo()
+    path = os.path.join(_cache_dir(), f"{tag}-provenance.json")
+    try:
+        if not os.path.exists(path):
+            release = gh.get_release(repo, tag, create=False)
+            assets = {a.filename: a for a in gh.get_assets(release)}
+            asset = assets.get("provenance.json")
+            if asset is None:
+                return {}
+            gh.download_asset(asset, path)
+        with open(path, "rb") as handle:
+            provenance = json.loads(handle.read())
+    except (gh.GitHubError, OSError, ValueError):
+        return {}
+    cores = {world.get("arch", ""): world.get("core", "")
+             for world in provenance.get("worlds", [])}
+    if not cores and provenance.get("core_snapshot"):
+        cores[config.default_world().arch] = provenance["core_snapshot"]
+    return cores
+
+
 def get_published_versions() -> tuple[str, dict[str, dict[str, str]]]:
     """Versions in the newest published snapshot, per world.
 

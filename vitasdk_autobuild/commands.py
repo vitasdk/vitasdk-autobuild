@@ -11,8 +11,8 @@ import tempfile
 import time
 from typing import Any
 
-from . import (build, build_plan, config, gh, proposals, queue, recipes, report,
-               repository, srcinfo, state)
+from . import (build, build_plan, config, gh, proposals, queue, recipes, repodb,
+               report, repository, srcinfo, state)
 from .config import World
 from .queue import Package, PackageStatus
 from .utils import group, notice, sanitize_tag, trust_git_checkouts
@@ -334,8 +334,9 @@ def report_short_catalogue(packages: list[Package]) -> None:
             print("\n".join(names))
     total = sum(len(names) for names in missing.values())
     raise SystemExit(
-        f"ERROR: the catalogue published without {total} package(s) the "
-        "recipes declare; the snapshot above holds only what is coherent")
+        f"ERROR: {total} package(s) are not published at the version the "
+        "recipes declare; the snapshot keeps what was already published of "
+        "them and leaves out the rest")
 
 
 def snapshot_dispatch_inputs(series: str) -> dict[str, str]:
@@ -366,6 +367,17 @@ def cmd_supervise(args: Any) -> None:
     plan = build_plan.create_build_plan(snapshot.packages, image_tags(snapshot.packages_dir))
     if not plan:
         notice("Nothing to build")
+        # A round that recovers without building, such as a failure marker
+        # cleared or a blocker fixed, leaves finished packages that no round
+        # will ever publish, because only a round that built asks.
+        behind = repository.publication_is_behind(snapshot.packages)
+        if behind and not args.dry_run and queue_is_drained(snapshot.packages):
+            with group(f"Finished but not in {snapshot.published_tag or 'any snapshot'}: {len(behind)}"):
+                print("\n".join(behind))
+            gh.dispatch_workflow(repo, SNAPSHOT_WORKFLOW, args.target_branch,
+                                 snapshot_dispatch_inputs(config.ACTIVE_SERIES))
+            notice("The published snapshot is behind what is finished: asked for a snapshot")
+            report_short_catalogue(snapshot.packages)
         return
     notice(f"Dispatching {len(plan)} worker(s): {report.summary_line(snapshot.packages)}")
     if args.dry_run:
@@ -424,12 +436,27 @@ def cmd_snapshot(args: Any) -> None:
     # for in that order too.
     published: list[World] = []
     total = 0
+    # Staging shows what is built; only a published snapshot keeps anything.
+    cores = {} if include_blocked else repodb.get_published_cores(snapshot.published_tag)
+    previous_assets: list[gh.Asset] | None = None
+    kept_names: dict[str, list[str]] = {}
     for world in config.worlds():
         packages = repository.selectable(snapshot.packages, world, include_blocked)
-        if not packages:
+        kept = repository.kept_from_published(snapshot.packages, world,
+                                              cores.get(world.arch, ""))
+        if not packages and not kept:
             notice(f"[{world.arch}] nothing publishable, skipped")
             continue
         assets = repository.select_assets(packages, world, snapshot.staging_assets)
+        if kept:
+            if previous_assets is None:
+                previous_assets = gh.get_assets(gh.get_release(
+                    gh.get_snapshot_repo(), snapshot.published_tag, create=False))
+            assets += repository.select_published_assets(kept, world, previous_assets)
+            kept_names[world.arch] = [package.name for package in kept]
+            with group(f"[{world.arch}] kept at the version {snapshot.published_tag} "
+                       f"published: {len(kept)}"):
+                print("\n".join(kept_names[world.arch]))
         name = world.staging_repository if args.staging else world.repository
         packages_dir = os.path.join(work_dir, world.arch, "packages")
         output_dir = os.path.join(work_dir, world.arch, name)
@@ -439,8 +466,9 @@ def cmd_snapshot(args: Any) -> None:
                                    world.arch)
         outputs[world.arch] = output_dir
         published.append(world)
-        total += len(packages)
-        notice(f"[{world.arch}] repository with {len(packages)} package(s)")
+        total += len(packages) + len(kept)
+        notice(f"[{world.arch}] repository with {len(packages) + len(kept)} package(s)"
+               + (f", {len(kept)} of them kept from {snapshot.published_tag}" if kept else ""))
 
     if not outputs:
         raise SystemExit("ERROR: no finished packages to publish")
@@ -461,7 +489,7 @@ def cmd_snapshot(args: Any) -> None:
         for entry in sorted(os.listdir(output_dir)):
             os.replace(os.path.join(output_dir, entry), os.path.join(combined, entry))
     repository.write_provenance(combined, snapshot.packages_revision,
-                                args.buildscripts_revision)
+                                args.buildscripts_revision, kept=kept_names)
     # Travels with the snapshot so the channel manifest can carry it, and the
     # client can say something at the moment somebody installs one of these.
     obsolete = deprecations(snapshot.packages)
