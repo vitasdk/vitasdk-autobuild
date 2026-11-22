@@ -6,6 +6,7 @@ environment and no business growing one. Everything here is urllib.
 
 import base64
 import calendar
+import http.client
 import json
 import os
 import re
@@ -118,7 +119,8 @@ def _request(method: str, url: str, *, data: bytes | BinaryIO | None = None,
             except ValueError:
                 message = body.decode("utf-8", "replace")
             raise GitHubError(e.code, f"{method} {url}: {message}") from None
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError,
+                http.client.HTTPException) as e:
             if data is not None and not isinstance(data, bytes):
                 raise
             last_error = e
@@ -268,10 +270,57 @@ def get_release(repo: str, tag: str, create: bool = True) -> Release:
     return Release(id=data["id"], tag=data["tag_name"], repo=repo)
 
 
+_RELEASES_QUERY = """
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    releases(first: 100, after: $cursor) {
+      nodes { tagName isDraft publishedAt createdAt }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+
+def _list_releases(repo: str) -> list[dict[str, Any]]:
+    """tag_name, draft and published_at of every release, without its assets.
+
+    The REST listing carries every asset of every release, which is megabytes
+    for a repository of snapshots. GraphQL needs a token; without one the REST
+    listing is all there is.
+    """
+
+    if not get_token():
+        return api_list(f"/repos/{repo}/releases")
+
+    owner, name = repo.split("/", 1)
+    url = os.environ.get("GITHUB_GRAPHQL_URL") or f"{API_ROOT}/graphql"
+    releases: list[dict[str, Any]] = []
+    cursor = None
+    while True:
+        answer = api("POST", url, {
+            "query": _RELEASES_QUERY,
+            "variables": {"owner": owner, "name": name, "cursor": cursor},
+        }) or {}
+        repository = (answer.get("data") or {}).get("repository")
+        if answer.get("errors") or not repository:
+            messages = "; ".join(e.get("message", "") for e in answer.get("errors") or [])
+            raise GitHubError(0, f"listing the releases of {repo}: {messages or 'no such repository'}")
+        page = repository["releases"]
+        releases.extend({
+            "tag_name": node["tagName"],
+            "draft": node["isDraft"],
+            "published_at": node["publishedAt"] or node["createdAt"] or "",
+        } for node in page["nodes"])
+        if not page["pageInfo"]["hasNextPage"]:
+            return releases
+        cursor = page["pageInfo"]["endCursor"]
+
+
 def find_releases(repo: str, prefix: str) -> list[str]:
     """Tags of every release whose name starts with prefix, newest first."""
 
-    tags = [r["tag_name"] for r in api_list(f"/repos/{repo}/releases")
+    tags = [r["tag_name"] for r in _list_releases(repo)
             if r["tag_name"].startswith(prefix) and not r.get("draft")]
     return sorted(tags, reverse=True)
 
@@ -284,7 +333,7 @@ def find_releases_with_dates(repo: str, prefix: str) -> list[tuple[str, str]]:
     """
 
     found = [(r["tag_name"], r.get("published_at") or r.get("created_at") or "")
-             for r in api_list(f"/repos/{repo}/releases")
+             for r in _list_releases(repo)
              if r["tag_name"].startswith(prefix) and not r.get("draft")]
     return sorted(found, reverse=True)
 
