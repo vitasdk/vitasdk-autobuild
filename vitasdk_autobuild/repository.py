@@ -50,6 +50,83 @@ def select_assets(packages: Iterable[Package], world: World,
     return selected
 
 
+def kept_from_published(packages: Iterable[Package], world: World,
+                        published_core: str) -> list[Package]:
+    """Held-back packages that stay at the version the last snapshot published.
+
+    Holding a build back keeps an unfinished group out of a snapshot, and used
+    to take the group's published versions out with it: 57 packages in August
+    and 82 in November were gone from the channel until somebody noticed. What
+    was published is still coherent with itself, so it stays.
+
+    Only while the core is the one the published snapshot was built against,
+    because a snapshot never mixes cores. And only when everything a package
+    depends on is also what was published: a dependency that moved on would
+    leave an old build beside a library it was not built against.
+    """
+
+    if not published_core or published_core != world.core:
+        return []
+
+    def published(package: Package) -> str:
+        return package.repo_versions.get(world.arch, "")
+
+    def unchanged(package: Package) -> bool:
+        return (package.get_status(world) is PackageStatus.FINISHED
+                and published(package) == package.version)
+
+    held = [p for p in packages
+            if p.builds_for(world) and published(p)
+            and p.get_status(world) is not PackageStatus.FINISHED]
+    kept = set(held)
+    settled = False
+    while not settled:
+        settled = True
+        for package in list(kept):
+            for dependency in package.ext_depends:
+                if not dependency.builds_for(world):
+                    continue
+                if dependency not in kept and not unchanged(dependency):
+                    kept.discard(package)
+                    settled = False
+                    break
+    return [p for p in held if p in kept]
+
+
+def select_published_assets(packages: Iterable[Package], world: World,
+                            assets: Iterable[Asset]) -> list[Asset]:
+    """The files a published snapshot holds for these packages, by its versions."""
+
+    by_name = {asset.filename: asset for asset in assets}
+    selected = []
+    for package in packages:
+        version = package.repo_versions.get(world.arch, "")
+        arch = package.file_arch(world)
+        for binary in package.binaries:
+            pattern = f"{binary}-{version}-{arch}.pkg.tar.*"
+            for name in sorted(fnmatch.filter(by_name, pattern)):
+                selected.append(by_name[name])
+    return selected
+
+
+def publication_is_behind(packages: Iterable[Package],
+                          worlds: Iterable[World] | None = None) -> list[str]:
+    """Finished packages the published snapshot does not carry at their version.
+
+    A held-back package is not behind: nothing can be published of it yet.
+    """
+
+    configured = list(worlds) if worlds is not None else config.worlds()
+    behind = []
+    for world in configured:
+        for package in packages:
+            if (package.builds_for(world)
+                    and package.get_status(world) is PackageStatus.FINISHED
+                    and package.repo_versions.get(world.arch, "") != package.version):
+                behind.append(f"{package.name} ({world.arch})")
+    return behind
+
+
 def download(assets: list[Asset], target_dir: str) -> list[str]:
     os.makedirs(target_dir, exist_ok=True)
 
@@ -100,7 +177,8 @@ def create_database(packages_dir: str, input_dir: str, output_dir: str,
 
 def write_provenance(output_dir: str, packages_revision: str,
                      buildscripts_revision: str = "",
-                     worlds: Iterable[World] | None = None) -> str:
+                     worlds: Iterable[World] | None = None,
+                     kept: dict[str, list[str]] | None = None) -> str:
     """Records exactly what a snapshot was built from.
 
     The core is per world and is not a guess: a world's staged packages are
@@ -123,6 +201,9 @@ def write_provenance(output_dir: str, packages_revision: str,
             ],
             "packages_revision": packages_revision,
             "buildscripts_revision": buildscripts_revision,
+            # Per world, the packages that are here at the version of the
+            # previous snapshot because their rebuild was held back.
+            "kept_from_previous": kept or {},
         }, handle, indent=2)
         handle.write("\n")
     return path
