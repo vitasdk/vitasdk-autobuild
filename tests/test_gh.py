@@ -1,7 +1,10 @@
 import base64
+import http.client
 import io
+import json
 import tarfile
 import unittest
+from unittest import mock
 
 from vitasdk_autobuild import config, gh, repodb
 
@@ -138,3 +141,105 @@ class TestRepositoryDatabase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class _Response:
+
+    def __init__(self, body=b"{}", error=None):
+        self.status = 200
+        self.headers = {}
+        self._body = body
+        self._error = error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        if self._error:
+            raise self._error
+        return self._body
+
+
+class TestCutResponses(unittest.TestCase):
+    """A body cut short is a network failure, and a GET is retried."""
+
+    def test_a_cut_body_is_retried(self):
+        cut = _Response(error=http.client.IncompleteRead(b"", 20119254))
+        with mock.patch.object(gh, "get_token", return_value=""), \
+                mock.patch.object(gh.time, "sleep"), \
+                mock.patch.object(gh, "_opener") as opener:
+            opener.open.side_effect = [cut, _Response(b'{"ok": true}')]
+            _, _, body = gh._request("GET", "https://x")
+        self.assertEqual(json.loads(body), {"ok": True})
+        self.assertEqual(opener.open.call_count, 2)
+
+    def test_a_body_that_never_arrives_is_a_github_error(self):
+        cut = _Response(error=http.client.IncompleteRead(b"", 1))
+        with mock.patch.object(gh, "get_token", return_value=""), \
+                mock.patch.object(gh.time, "sleep"), \
+                mock.patch.object(gh, "_opener") as opener:
+            opener.open.return_value = cut
+            with self.assertRaises(gh.GitHubError):
+                gh._request("GET", "https://x", retries=2)
+
+
+def _page(nodes, cursor=None):
+    return {"data": {"repository": {"releases": {
+        "nodes": nodes,
+        "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor},
+    }}}}
+
+
+def _node(tag, draft=False, published="2026-11-22T19:34:31Z"):
+    return {"tagName": tag, "isDraft": draft, "publishedAt": published,
+            "createdAt": "2026-11-22T19:00:00Z"}
+
+
+class TestReleaseListing(unittest.TestCase):
+    """Tags come from a listing that does not drag every asset along."""
+
+    def test_asks_graphql_when_there_is_a_token(self):
+        pages = [_page([_node("packages-snapshot-2"), _node("other-1")], cursor="c1"),
+                 _page([_node("packages-snapshot-1"), _node("packages-snapshot-3", draft=True)])]
+        with mock.patch.object(gh, "get_token", return_value="t"), \
+                mock.patch.object(gh, "api", side_effect=pages) as api, \
+                mock.patch.object(gh, "api_list") as rest:
+            tags = gh.find_releases("vitasdk/x", "packages-snapshot-")
+        self.assertEqual(tags, ["packages-snapshot-2", "packages-snapshot-1"])
+        rest.assert_not_called()
+        self.assertEqual(api.call_count, 2)
+        first, second = (call.args[2]["variables"] for call in api.call_args_list)
+        self.assertEqual((first["owner"], first["name"], first["cursor"]), ("vitasdk", "x", None))
+        self.assertEqual(second["cursor"], "c1")
+        self.assertTrue(api.call_args_list[0].args[1].endswith("/graphql"))
+
+    def test_dates_come_with_the_same_listing(self):
+        pages = [_page([_node("s-1", published="2026-11-01T00:00:00Z"),
+                        _node("s-2", published=None)])]
+        with mock.patch.object(gh, "get_token", return_value="t"), \
+                mock.patch.object(gh, "api", side_effect=pages):
+            found = gh.find_releases_with_dates("vitasdk/x", "s-")
+        self.assertEqual(found, [("s-2", "2026-11-22T19:00:00Z"), ("s-1", "2026-11-01T00:00:00Z")])
+
+    def test_falls_back_to_rest_without_a_token(self):
+        listing = [{"tag_name": "s-1", "draft": False}, {"tag_name": "s-2", "draft": True}]
+        with mock.patch.object(gh, "get_token", return_value=""), \
+                mock.patch.object(gh, "api") as api, \
+                mock.patch.object(gh, "api_list", return_value=listing) as rest:
+            tags = gh.find_releases("vitasdk/x", "s-")
+        self.assertEqual(tags, ["s-1"])
+        api.assert_not_called()
+        rest.assert_called_once_with("/repos/vitasdk/x/releases")
+
+    def test_a_graphql_error_is_not_an_empty_listing(self):
+        # An empty answer read as "nothing published" would rebuild the world.
+        answer = {"data": {"repository": None}, "errors": [{"message": "Could not resolve"}]}
+        with mock.patch.object(gh, "get_token", return_value="t"), \
+                mock.patch.object(gh, "api", return_value=answer):
+            with self.assertRaises(gh.GitHubError) as caught:
+                gh.find_releases("vitasdk/x", "s-")
+        self.assertIn("Could not resolve", caught.exception.message)
