@@ -142,7 +142,7 @@ WORLDS: list[World] = [
     # cannot be mixed by accident.
     World(
         arch="vita_softfp",
-        core="sdk-vita_softfp-snapshot-20260828.667.1",
+        core="sdk-vita_softfp-snapshot-20261123.968.4",
         repository="vita_softfp",
         triple="arm-vita-eabi",
         description="softfp float ABI, for ports that link Android .so files",
